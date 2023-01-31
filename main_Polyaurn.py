@@ -25,7 +25,7 @@ mse_SMC = np.zeros((run, T))
 msecum_SMC = np.zeros((run, T))
 
 for i in range(run): 
-    m_list, s_list, w_list = filtering(T, rspf, o_SMC[i, :], N_p=N_p, dyn=1)
+    m_list, s_list, w_list = filtering(T, rspf, m_SMC[i, 0], s_SMC[i, 0], o_SMC[i, :], N_p=N_p, dyn=1)
     mlist_SMC[i, :] = m_list
     slist_SMC[i, :] = s_list
     wlist_SMC[i, :] = w_list

@@ -7,7 +7,7 @@ T = 50
 N_p = 2000
 
 run = 1
-m_SMC = np.zeros((run, T))
+m_SMC = np.zeros((run, T), dtype=int)
 s_SMC = np.zeros((run, T))
 o_SMC = np.zeros((run, T))
 

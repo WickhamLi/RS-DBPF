@@ -3,7 +3,7 @@ from matplotlib import pyplot as plt
 from scipy import stats
 
 class RSPF: 
-    def __init__(self, tran_matrix, A, B, C, D, mu_u=0., sigma_u=0.1, mu_v=0., sigma_v=0.1, beta=np.array(1)): 
+    def __init__(self, tran_matrix, A, B, C, D, mu_u=0., sigma_u=np.sqrt(0.1), mu_v=0., sigma_v=np.sqrt(0.1), beta=np.array(1)): 
         self.mat_P = tran_matrix
         self.co_A = A
         self.co_B = B
@@ -16,7 +16,7 @@ class RSPF:
         self.beta = beta.reshape(1, -1)
         
     def initial(self, size=1): 
-        return np.random.choice([i for i in range(8)], replace=True, size=size), np.random.uniform(-0.5, 0.5, size=size)
+        return np.random.choice([i for i in range(int(8))], replace=True, size=size), np.random.uniform(-0.5, 0.5, size=size)
         
     def Markov_dynamic(self, m_p, size=1): 
 #         data size = m_p.size
@@ -127,7 +127,7 @@ def generate_data(T, model, size=1, dyn=0):
 def weights_bootstrap(model, w_list, m_list, s_list, o): 
     lw = np.log(w_list)
     for i in range(len(s_list)): 
-        lw[i] += stats.norm(loc=model.co_C[m_list[i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[i]], scale=0.1).logpdf(o)
+        lw[i] += stats.norm(loc=model.co_C[m_list[i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[i]], scale=np.sqrt(0.1)).logpdf(o)
 #         w += 10**(-300)
     w = np.exp(lw - lw.max())
     return w/w.sum()
@@ -140,7 +140,7 @@ def weights_proposal(model, w_list, m_list, s_list, o, switch):
     else:
         lp = np.log([1/len(model.co_A)]*len(w_list))
     for i in range(len(s_list)): 
-        lw[i] += stats.norm(loc=model.co_C[m_list[-1, i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[-1, i]], scale=0.1).logpdf(o) + lp[i] - np.log((1/len(model.co_A)))
+        lw[i] += stats.norm(loc=model.co_C[m_list[-1, i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[-1, i]], scale=np.sqrt(0.1)).logpdf(o) + lp[i] - np.log((1/len(model.co_A)))
 #         w += 10**(-300)
 #         print(lw[i])
     w = np.exp(lw - lw.max())
