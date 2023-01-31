@@ -13,7 +13,7 @@ o_SMC = np.zeros((run, T))
 
 # np.random.seed(222)
 for i in range(run): 
-    m, s, o = generate_data(50, rspf)
+    m, s, o = generate_data(T, rspf)
     m_SMC[i, :] = np.array(m).T
     s_SMC[i, :] = np.array(s).T
     o_SMC[i, :] = np.array(o).T
