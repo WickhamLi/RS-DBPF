@@ -134,11 +134,11 @@ def weights_bootstrap(model, w_list, m_list, s_list, o):
 
 def weights_proposal(model, w_list, m_list, s_list, o, switch): 
     lw = np.log(w_list)
-    if m_list.shape[0]>1: 
-        if switch==2: 
+    # if m_list.shape[0]>1: 
+    if switch==2: 
             lp = np.log(model.mat_P[m_list[-2, :], m_list[-1, :]])
-    else:
-        lp = np.log([1/len(model.co_A)]*len(w_list))
+    # else:
+    #     lp = np.log([1/len(model.co_A)]*len(w_list))
     for i in range(len(s_list)): 
         lw[i] += stats.norm(loc=model.co_C[m_list[-1, i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[-1, i]], scale=np.sqrt(0.1)).logpdf(o) + lp[i] - np.log((1/len(model.co_A)))
 #         w += 10**(-300)
@@ -172,9 +172,9 @@ def filtering(T, model, m, s, o, N_p=200, dyn=2, re=0, switch=2):
     s_list = np.zeros((T, N_p))
     m_list = np.zeros((T, N_p), dtype=int)
     w_list = np.zeros((T, N_p))
-    # m_list[0, :], s_list[0, :] = model.initial(size=N_p)
-    m_list[0, :] = m
-    s_list[0, :] = s
+    m_list[0, :], s_list[0, :] = model.initial(size=N_p)
+    # m_list[0, :] = m
+    # s_list[0, :] = s
     w_list[0, :] = 1/N_p
     for t in range(1, T): 
         if dyn==1: 
@@ -189,7 +189,7 @@ def filtering(T, model, m, s, o, N_p=200, dyn=2, re=0, switch=2):
         if dyn==1 or dyn==2: 
             w_list[t, :] = weights_bootstrap(model, w_list[t-1, :], m_list[t, :], s_list[t, :], o[t].astype(float))
         else:
-            w_list[t, :] = weights_proposal(model, w_list[t-1, :], m_list[:t, :], s_list[t, :], o[t].astype(float), switch)
+            w_list[t, :] = weights_proposal(model, w_list[t-1, :], m_list[:t+1, :], s_list[t, :], o[t].astype(float), switch)
         ESS = 1 / np.sum(w_list[t, :]**2)
 #         print(ESS)
         if ESS < s_list.shape[-1]: 
@@ -201,6 +201,7 @@ def filtering(T, model, m, s, o, N_p=200, dyn=2, re=0, switch=2):
             w_list[t, :] = 1 / len(w_list[t, :])
             m_list[t, :] = m_list[t, index]
             s_list[t, :] = s_list[t, index]
+
     return m_list, s_list, w_list
 
 def MSE(w_list, s_list, s): 
