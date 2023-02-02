@@ -1,4 +1,4 @@
-from rspf import *
+from rspf_np import *
 
 P, A, B, C, D, beta = create_parameters()
 rspf = RSPF(P, A, B, C, D, beta=beta)
@@ -11,7 +11,7 @@ run = 500
 # s_data = np.zeros((run, T))
 # o_data = np.zeros((run, T))
 
-m_data, s_data, o_data = generate_data(T, rspf, batch=run, dyn="Poly")
+m_data, s_data, o_data = generate_data(T, rspf, batch=run, dyn="Mark")
 
 # np.random.seed(222)
 # for i in range(run): 
@@ -27,7 +27,7 @@ m_data, s_data, o_data = generate_data(T, rspf, batch=run, dyn="Poly")
 # msecum_list = np.zeros((run, T))
 
 # dyn=Mark/Poly, prop=Boot/Uni/Deter, re=sys/mul
-m_parlist, s_parlist, w_parlist = filtering(rspf, o_data.reshape(run, -1), N_p=N_p, dyn="Poly", prop="Uni", re="sys")
+m_parlist, s_parlist, w_parlist = filtering(rspf, o_data.reshape(run, -1), N_p=N_p, dyn="Mark", prop="Boot", re="mul")
 mse, mse_cum = MSE(s_parlist, s_data.reshape(run, T), w_parlist)
 
 # for i in range(run): 
@@ -43,7 +43,7 @@ plt.xlabel('Time Step')
 plt.yscale('log')
 plt.legend()
 plt.tight_layout()
-# plt.savefig('RSPFMarkov.png')
+# plt.savefig('RSPFMark.png')
 plt.show()
 
 print(np.mean(mse_cum, axis=0)[-1])
