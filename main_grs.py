@@ -1,7 +1,10 @@
-from rspf_np import *
+# from rspf_np import *
+from rspf_torch import *
+
+device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
 P, A, B, C, D, beta = create_parameters()
-rspf = RSPF(P, A, B, C, D, beta=beta)
+rspf = RSPF(P, A, B, C, D, beta=beta).to(device)
     
 T = 50
 N_p = 2000
@@ -37,7 +40,7 @@ mse, mse_cum = MSE(s_parlist, s_data.reshape(run, T), w_parlist)
 #     wlist_SMC[i, :] = w_list
 #     mse_SMC[i, :], msecum_SMC[i, :] = MSE(wlist_SMC[i, :], slist_SMC[i, :], s_SMC[i, :])
 
-plt.plot(np.mean(mse_cum, axis=0), label='RSPF(Bootstrap)')
+plt.plot(mse_cum.mean(dim=0), label='RSPF(Bootstrap)')
 plt.ylabel('Average Cumulative MSE')
 plt.xlabel('Time Step')
 plt.yscale('log')
@@ -46,5 +49,5 @@ plt.tight_layout()
 # plt.savefig('RSPFMark.png')
 plt.show()
 
-print(np.mean(mse_cum, axis=0)[-1])
-print(np.mean(mse), np.max(mse), np.min(mse))
+print(mse_cum.mean(dim=0)[-1])
+print(mse.mean(), mse.max(), mse.min())
