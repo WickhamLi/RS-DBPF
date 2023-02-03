@@ -7,7 +7,7 @@ from scipy import stats
 device = torch.device('cuda') if torch.cuda.is_available else torch.device('cpu')
 
 class RSDPF(): 
-    def __init__(self, tran_matrix, beta=torch.Tensor([1]), learning_rate=0.01): 
+    def __init__(self, tran_matrix, beta=torch.Tensor([1]), learning_rate=0.001): 
         self.mat_P = tran_matrix
         self.beta = beta
         self.co_A = torch.Tensor(self.mat_P.size()[-1]).uniform_(-1, 1)
@@ -22,32 +22,35 @@ class RSDPF():
         self.optim = torch.optim.Adam([self.co_A, self.co_B, self.co_C, self.co_D], lr = learning_rate)
 
     def filtering(self, model, o, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
-        batch, T = o.shape
+        batch, _, T = o.shape
         m_list = torch.zeros(batch, N_p, T, dtype=int)
         s_list = torch.zeros(batch, N_p, T)
         w_list = torch.zeros(batch, N_p, T)
         m_list[:, :, 0], s_list[:, :, 0] = model.initial(size=(batch, N_p))
+        s_list_re = s_list.clone().detach()
+        m_list_re = m_list.clone().detach()
         # m_list[0, :] = m
         # s_list[0, :] = s
         w_list[:, :, 0] = 1/N_p
+        w_list_re = w_list.clone().detach()
         for t in range(1, T): 
             if prop=="Boot": 
                 if dyn=="Poly": 
-                    m_list[:, :, t] = model.Polyaurn_dynamic(m_list[:, :, :t])
+                    m_list[:, :, t] = model.Polyaurn_dynamic(m_list_re[:, :, :t])
                 elif dyn=="Mark": 
-                    m_list[:, :, t] = model.Markov_dynamic(m_list[:, :, t-1])
+                    m_list[:, :, t] = model.Markov_dynamic(m_list_re[:, :, t-1])
             elif prop=="Uni": 
                 m_list[:, :, t] = model.propuni_dynamic(size=(batch, N_p))
             elif prop=='Deter': 
                 m_list[:, :, t] = torch.arange(len(model.co_A)).tile(batch, int(N_p/len(model.co_A)))
-            s_list[:, :, t] = model.state(m_list[:, :, t], s_list[:, :, t-1])
+            s_list[:, :, [t]] = model.state(m_list[:, :, [t]], s_list_re[:, :, [t-1]])
             if prop=="Boot": 
-                w_list[:, :, t] = weights_bootstrap(model, w_list[:, :, t-1], m_list[:, :, t], s_list[:, :, t], o[:, [t]])
+                w_list[:, :, [t]] = weights_bootstrap(model, w_list_re[:, :, [t-1]], m_list[:, :, [t]], s_list[:, :, [t]], o[:, :, [t]])
             else:
                 if dyn=="Mark": 
-                    w_list[:, :, t] = weights_proposal(model, w_list[:, :, t-1], m_list[:, :, t-1:t+1], s_list[:, :, t], o[:, [t]], dyn)
+                    w_list[:, :, t] = weights_proposal(model, w_list_re[:, :, t-1], m_list[:, :, t-1:t+1], s_list[:, :, t], o[:, [t]], dyn)
                 else: 
-                    w_list[:, :, t] = weights_proposal(model, w_list[:, :, t-1], m_list[:, :, :t+1], s_list[:, :, t], o[:, [t]], dyn)
+                    w_list[:, :, t] = weights_proposal(model, w_list_re[:, :, t-1], m_list[:, :, :t+1], s_list[:, :, t], o[:, [t]], dyn)
             ESS = 1 / (w_list[:, :, t]**2).sum(dim=1) < s_list.size()[1]
     #         print(ESS)
             if ESS.sum(): 
@@ -58,7 +61,7 @@ class RSDPF():
                 else: 
                     re_index = torch.where(ESS)[0]
                     index[re_index, :] = resample_multinomial(w_list[re_index, :, t])
-                w_list[:, :, t] = 1 / N_p
+                w_list_re[re_index, :, t] = 1 / N_p
                 # for b in range(batch): 
                 #     for n in range(N_p): 
                 #         m_list[b, n, t] = np.copy(m_list[b, index[b, n], t])
@@ -66,35 +69,38 @@ class RSDPF():
                 
                 batch_index = tuple(i//N_p for i in range(batch * N_p))
                 index_flatten = tuple(index.view(-1))
-                m_trans = m_list[batch_index, index_flatten, [t]]
-                m_list[:, :, t] = m_trans.view(batch, -1)
-                s_trans = s_list[batch_index, index_flatten, [t]]
-                s_list[:, :, t] = s_trans.view(batch, -1)
+                m_trans = m_list[batch_index, index_flatten, [t]].clone().detach()
+                m_list_re[:, :, t] = m_trans.view(batch, -1)
+                s_trans = s_list[batch_index, index_flatten, [t]].clone().detach()
+                s_list_re[:, :, t] = s_trans.view(batch, -1)
 
         return m_list, s_list, w_list
 
 
     def forward(self, o_data, N_p, dyn, prop, re):  
-        model = RSPF(self.mat_P, self.co_A, self.co_B, self.co_C, self.co_D, self.beta)
-        m_parlist, s_parlist, w_parlist = self.filtering(model, o_data.reshape(-1, 50), N_p=N_p, dyn=dyn, prop=prop, re=re)
+        model = RSPF(self.mat_P, self.co_A, self.co_B, self.co_C, self.co_D, beta=self.beta)
+        m_parlist, s_parlist, w_parlist = self.filtering(model, o_data, N_p=N_p, dyn=dyn, prop=prop, re=re)
         s_est = (w_parlist * s_parlist).sum(dim=1)
         return s_est
 
 
     def training(self, s_data, o_data, N_iter=100, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
         # s_data, o_data = data
+        l = np.zeros(N_iter)
         for epoch in range(N_iter): 
             s_est = self.forward(o_data, N_p, dyn, prop, re)
             loss = ((s_est - s_data)**2).mean()
             loss.requires_grad_(True)
             loss.backward()
+            l[epoch] = loss
+
             self.optim.step()
             self.optim.zero_grad()
         
-            if not epoch % 10: 
-                print(f'epoch{epoch+1}: loss = {loss:.8f}')
+            print(f'epoch{epoch+1}: loss = {loss:.8f}')
+        return l
 
-    def testing(self, s_data, o_data, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
+    def testing(self, s_data, o_data, loss, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
         s_est = self.forward(o_data, N_p, dyn, prop, re)
         loss = self.loss(s_est, s_data)
         print(f'loss = {loss:.8f}')
@@ -108,6 +114,10 @@ class RSDPF():
         plt.tight_layout()
         # plt.savefig('RSPFMark.png')
         plt.show()
+
+        plt.plot(loss)
+        plt.show()
+
         print(mse_cum.mean(dim=0)[-1])
         print(mse.mean(), mse.max(), mse.min())
 
@@ -165,7 +175,8 @@ class RSPF:
         return m_t
         
     def state(self, m_t, s_p): 
-        return self.co_A[m_t] * s_p + self.co_B[m_t] + torch.normal(mean=self.mu_u, std=self.sigma_u, size=tuple(s_p.size()))
+        x = self.co_A[m_t] * s_p + self.co_B[m_t] + torch.normal(mean=self.mu_u, std=self.sigma_u, size=s_p.size())
+        return x
         
     def obs(self, m_t, s_t): 
         return self.co_C[m_t] * torch.sqrt(torch.abs(s_t)) + self.co_D[m_t] + torch.normal(mean=self.mu_v, std=self.sigma_v, size=s_t.size())
@@ -210,7 +221,7 @@ def weights_bootstrap(model, w_list, m_list, s_list, o):
     lw = torch.log(w_list)
     o = torch.ones(s_list.size()) * o
     o -= (model.co_C[m_list] * torch.sqrt(torch.abs(s_list)) + model.co_D[m_list])
-    lw += stats.norm(scale=0.1**(0.5)).logpdf(o)
+    lw += torch.distributions.normal.Normal(loc=0., scale=0.1**(0.5)).log_prob(o)
 #     for i in range(len(s_list)): 
 #         lw[i] += stats.norm(loc=model.co_C[m_list[i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[i]], scale=np.sqrt(0.1)).logpdf(o)
 # #         w += 10**(-300)
@@ -236,7 +247,7 @@ def weights_proposal(model, w_list, m_list, s_list, o, dyn):
         index_flatten = tuple(m_list[:, :, -1].view(-1))
         lp = torch.log(prob[batch_index, pars_index, index_flatten].view(batch, N_p))
 
-    lw += stats.norm(scale=0.1**(0.5)).logpdf(o) + lp - torch.log((1/len(model.co_A)))
+    lw += torch.distributions.normal.Normal(loc=0., scale=0.1**(0.5)).log_prob(o) + lp - torch.log((1/len(model.co_A)))
     # for i in range(len(s_list)): 
     #     lw[i] += stats.norm(loc=model.co_C[m_list[-1, i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[-1, i]], scale=np.sqrt(0.1)).logpdf(o) + lp[i] - np.log((1/len(model.co_A)))
 #         w += 10**(-300)
@@ -254,6 +265,7 @@ def inv_cdf(cum, ws):
         #     k += 1
         #     w += ws[k]
         # index[i] = k
+    index = torch.where(index < ws.shape[-1], index, ws.shape[-1]-1)
     return index
     
 
