@@ -76,7 +76,7 @@ class RSDPF():
 
     def forward(self, o_data, N_p, dyn, prop, re):  
         model = RSPF(self.mat_P, self.co_A, self.co_B, self.co_C, self.co_D, self.beta)
-        m_parlist, s_parlist, w_parlist = self.filtering(model, o_data.reshape(-1, 1), N_p=N_p, dyn=dyn, prop=prop, re=re)
+        m_parlist, s_parlist, w_parlist = self.filtering(model, o_data.reshape(-1, 50), N_p=N_p, dyn=dyn, prop=prop, re=re)
         s_est = (w_parlist * s_parlist).sum(dim=1)
         return s_est
 
@@ -165,7 +165,7 @@ class RSPF:
         return m_t
         
     def state(self, m_t, s_p): 
-        return self.co_A[m_t] * s_p + self.co_B[m_t] + torch.normal(mean=self.mu_u, std=self.sigma_u, size=s_p.size())
+        return self.co_A[m_t] * s_p + self.co_B[m_t] + torch.normal(mean=self.mu_u, std=self.sigma_u, size=tuple(s_p.size()))
         
     def obs(self, m_t, s_t): 
         return self.co_C[m_t] * torch.sqrt(torch.abs(s_t)) + self.co_D[m_t] + torch.normal(mean=self.mu_v, std=self.sigma_v, size=s_t.size())
