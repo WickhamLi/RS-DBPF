@@ -1,7 +1,125 @@
 import numpy as np
 import torch
+import torch.nn as nn
 from matplotlib import pyplot as plt
 from scipy import stats
+
+device = torch.device('cuda') if torch.cuda.is_available else torch.device('cpu')
+
+class RSDPF(): 
+    def __init__(self, tran_matrix, beta=torch.Tensor([1]), learning_rate=0.01): 
+        self.mat_P = tran_matrix
+        self.beta = beta
+        self.co_A = torch.Tensor(self.mat_P.size()[-1]).uniform_(-1, 1)
+        self.co_A.requires_grad_(True)
+        self.co_B = torch.Tensor(self.mat_P.size()[-1]).uniform_(-4, 4)
+        self.co_B.requires_grad_(True)
+        self.co_C = self.co_A.clone().detach()
+        self.co_C.requires_grad_(True)
+        self.co_D = self.co_B.clone().detach()
+        self.co_D.requires_grad_(True)
+        self.loss = nn.MSELoss()
+        self.optim = torch.optim.Adam([self.co_A, self.co_B, self.co_C, self.co_D], lr = learning_rate)
+
+    def filtering(self, model, o, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
+        batch, T = o.shape
+        m_list = torch.zeros(batch, N_p, T, dtype=int)
+        s_list = torch.zeros(batch, N_p, T)
+        w_list = torch.zeros(batch, N_p, T)
+        m_list[:, :, 0], s_list[:, :, 0] = model.initial(size=(batch, N_p))
+        # m_list[0, :] = m
+        # s_list[0, :] = s
+        w_list[:, :, 0] = 1/N_p
+        for t in range(1, T): 
+            if prop=="Boot": 
+                if dyn=="Poly": 
+                    m_list[:, :, t] = model.Polyaurn_dynamic(m_list[:, :, :t])
+                elif dyn=="Mark": 
+                    m_list[:, :, t] = model.Markov_dynamic(m_list[:, :, t-1])
+            elif prop=="Uni": 
+                m_list[:, :, t] = model.propuni_dynamic(size=(batch, N_p))
+            elif prop=='Deter': 
+                m_list[:, :, t] = torch.arange(len(model.co_A)).tile(batch, int(N_p/len(model.co_A)))
+            s_list[:, :, t] = model.state(m_list[:, :, t], s_list[:, :, t-1])
+            if prop=="Boot": 
+                w_list[:, :, t] = weights_bootstrap(model, w_list[:, :, t-1], m_list[:, :, t], s_list[:, :, t], o[:, [t]])
+            else:
+                if dyn=="Mark": 
+                    w_list[:, :, t] = weights_proposal(model, w_list[:, :, t-1], m_list[:, :, t-1:t+1], s_list[:, :, t], o[:, [t]], dyn)
+                else: 
+                    w_list[:, :, t] = weights_proposal(model, w_list[:, :, t-1], m_list[:, :, :t+1], s_list[:, :, t], o[:, [t]], dyn)
+            ESS = 1 / (w_list[:, :, t]**2).sum(dim=1) < s_list.size()[1]
+    #         print(ESS)
+            if ESS.sum(): 
+                index = torch.arange(N_p).tile(batch, 1)
+                if re=="sys": 
+                    re_index = torch.where(ESS)[0]
+                    index[re_index, :] = resample_systematic(w_list[re_index, :, t])
+                else: 
+                    re_index = torch.where(ESS)[0]
+                    index[re_index, :] = resample_multinomial(w_list[re_index, :, t])
+                w_list[:, :, t] = 1 / N_p
+                # for b in range(batch): 
+                #     for n in range(N_p): 
+                #         m_list[b, n, t] = np.copy(m_list[b, index[b, n], t])
+                #         s_list[b, n, t] = np.copy(m_list[b, index[b, n], t])
+                
+                batch_index = tuple(i//N_p for i in range(batch * N_p))
+                index_flatten = tuple(index.view(-1))
+                m_trans = m_list[batch_index, index_flatten, [t]]
+                m_list[:, :, t] = m_trans.view(batch, -1)
+                s_trans = s_list[batch_index, index_flatten, [t]]
+                s_list[:, :, t] = s_trans.view(batch, -1)
+
+        return m_list, s_list, w_list
+
+
+    def forward(self, o_data, N_p, dyn, prop, re):  
+        model = RSPF(self.mat_P, self.co_A, self.co_B, self.co_C, self.co_D, self.beta)
+        m_parlist, s_parlist, w_parlist = self.filtering(model, o_data.reshape(-1, 1), N_p=N_p, dyn=dyn, prop=prop, re=re)
+        s_est = (w_parlist * s_parlist).sum(dim=1)
+        return s_est
+
+
+    def training(self, s_data, o_data, N_iter=100, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
+        # s_data, o_data = data
+        for epoch in range(N_iter): 
+            s_est = self.forward(o_data, N_p, dyn, prop, re)
+            loss = ((s_est - s_data)**2).mean()
+            loss.requires_grad_(True)
+            loss.backward()
+            self.optim.step()
+            self.optim.zero_grad()
+        
+            if not epoch % 10: 
+                print(f'epoch{epoch+1}: loss = {loss:.8f}')
+
+    def testing(self, s_data, o_data, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
+        s_est = self.forward(o_data, N_p, dyn, prop, re)
+        loss = self.loss(s_est, s_data)
+        print(f'loss = {loss:.8f}')
+        mse = (s_est - s_data)**2
+        mse_cum = mse.cumsum(dim=-1)
+        plt.plot(mse_cum.mean(dim=0), label='RSPF(Bootstrap)')
+        plt.ylabel('Average Cumulative MSE')
+        plt.xlabel('Time Step')
+        plt.yscale('log')
+        plt.legend()
+        plt.tight_layout()
+        # plt.savefig('RSPFMark.png')
+        plt.show()
+        print(mse_cum.mean(dim=0)[-1])
+        print(mse.mean(), mse.max(), mse.min())
+
+
+        
+
+# def MSE(s_list, s, w_list): 
+#     s_est = (w_list * s_list).sum(dim=1)
+#     mse = (s_est - s)**2
+#     mse_cum = mse.cumsum(dim=-1)
+#     return mse, mse_cum
+
 
 class RSPF: 
     def __init__(self, tran_matrix, A, B, C, D, mu_u=0., sigma_u=0.1**(0.5), mu_v=0., sigma_v=0.1**(0.5), beta=1): 
@@ -15,53 +133,31 @@ class RSPF:
         self.mu_v = mu_v
         self.sigma_v = sigma_v
         self.beta = beta
-        
+
     def initial(self, size=(1, 1)): 
         return torch.multinomial(torch.ones(size[0], len(self.co_A)), replacement=True, num_samples=size[1]), torch.Tensor(size=size).uniform_(-0.5, 0.5)
-        
+
     def Markov_dynamic(self, m_p): 
         batch, N_p = m_p.size()
         N_m = self.mat_P.size()[-1]
-
         sample = torch.rand(batch, N_p, 1)
         m_t = torch.ones(batch, N_p, 1, dtype=int) * N_m
-#         for i in range(size): 
-#             k = 0
-#             j = -1
-#             while sample[i] > k: 
-#                 j += 1
-#                 k += self.mat_P[m_p[i]][j]
-#             m_t[i] = j
-#         m_t = m_t.astype(int)
         cum = self.mat_P[m_p, :].cumsum(axis=2)
         m_t -= (sample < cum).sum(dim=2, keepdim=True)
-
         return m_t.view(batch, N_p)
     
-    def Polyaurn_dynamic(self, m_p): 
+    def Polyaurn_dynamic(self, m_p):
         batch, N_p = m_p.size()[:2]
         N_m = len(self.beta)
-
         sample = torch.rand(batch, N_p, 1)
         m_t = torch.ones(batch, N_p, 1, dtype=int) * N_m
         alpha = torch.zeros(batch, N_p, N_m)
-
         for m_index in range(N_m): 
             alpha[:, :, m_index] = (m_p == m_index).sum(dim=2)
-        
         beta = self.beta[None, None, :]
         prob = (alpha + beta)/(alpha + beta).sum(dim=2, keepdim=True)
-#         for i in range(size): 
-#             k = 0
-#             j = -1
-#             while sample[i] > k: 
-#                 j += 1
-#                 k += post[i, j]
-#             m_t[i] = j
-#         m_t = m_t.astype(int)
         cum = prob.cumsum(dim=2)
         m_t -= (sample < cum).sum(axis=2, keepdims=True)
-
         return m_t.view(batch, N_p)
     
     def propuni_dynamic(self, size=1): 
@@ -174,60 +270,5 @@ def resample_multinomial(ws):
 
     return inv_cdf(cum, ws)
 
-def filtering(model, o, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
-    batch, T = o.shape
-    m_list = torch.zeros(batch, N_p, T, dtype=int)
-    s_list = torch.zeros(batch, N_p, T)
-    w_list = torch.zeros(batch, N_p, T)
-    m_list[:, :, 0], s_list[:, :, 0] = model.initial(size=(batch, N_p))
-    # m_list[0, :] = m
-    # s_list[0, :] = s
-    w_list[:, :, 0] = 1/N_p
-    for t in range(1, T): 
-        if prop=="Boot": 
-            if dyn=="Poly": 
-                m_list[:, :, t] = model.Polyaurn_dynamic(m_list[:, :, :t])
-            elif dyn=="Mark": 
-                m_list[:, :, t] = model.Markov_dynamic(m_list[:, :, t-1])
-        elif prop=="Uni": 
-            m_list[:, :, t] = model.propuni_dynamic(size=(batch, N_p))
-        elif prop=='Deter': 
-            m_list[:, :, t] = torch.arange(len(model.co_A)).tile(batch, int(N_p/len(model.co_A)))
-        s_list[:, :, t] = model.state(m_list[:, :, t], s_list[:, :, t-1])
-        if prop=="Boot": 
-            w_list[:, :, t] = weights_bootstrap(model, w_list[:, :, t-1], m_list[:, :, t], s_list[:, :, t], o[:, [t]])
-        else:
-            if dyn=="Mark": 
-                w_list[:, :, t] = weights_proposal(model, w_list[:, :, t-1], m_list[:, :, t-1:t+1], s_list[:, :, t], o[:, [t]], dyn)
-            else: 
-                w_list[:, :, t] = weights_proposal(model, w_list[:, :, t-1], m_list[:, :, :t+1], s_list[:, :, t], o[:, [t]], dyn)
-        ESS = 1 / (w_list[:, :, t]**2).sum(dim=1) < s_list.size()[1]
-#         print(ESS)
-        if ESS.sum(): 
-            index = torch.arange(N_p).tile(batch, 1)
-            if re=="sys": 
-                re_index = torch.where(ESS)[0]
-                index[re_index, :] = resample_systematic(w_list[re_index, :, t])
-            else: 
-                re_index = torch.where(ESS)[0]
-                index[re_index, :] = resample_multinomial(w_list[re_index, :, t])
-            w_list[:, :, t] = 1 / N_p
-            # for b in range(batch): 
-            #     for n in range(N_p): 
-            #         m_list[b, n, t] = np.copy(m_list[b, index[b, n], t])
-            #         s_list[b, n, t] = np.copy(m_list[b, index[b, n], t])
-            
-            batch_index = tuple(i//N_p for i in range(batch * N_p))
-            index_flatten = tuple(index.view(-1))
-            m_trans = m_list[batch_index, index_flatten, [t]]
-            m_list[:, :, t] = m_trans.view(batch, -1)
-            s_trans = s_list[batch_index, index_flatten, [t]]
-            s_list[:, :, t] = s_trans.view(batch, -1)
 
-    return m_list, s_list, w_list
 
-def MSE(s_list, s, w_list): 
-    s_est = (w_list * s_list).sum(dim=1)
-    mse = (s_est - s)**2
-    mse_cum = mse.cumsum(dim=-1)
-    return mse, mse_cum

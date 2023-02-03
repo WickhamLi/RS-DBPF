@@ -1,10 +1,8 @@
-# from rspf_np import *
-from rspf_torch import *
-
-device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+from rspf_np import *
+# from rspf_torch import *
 
 P, A, B, C, D, beta = create_parameters()
-rspf = RSPF(P, A, B, C, D, beta=beta).to(device)
+rspf = RSPF(P, A, B, C, D, beta=beta)
     
 T = 50
 N_p = 2000
