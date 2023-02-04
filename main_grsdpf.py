@@ -1,5 +1,7 @@
 # from rspf_np import *
 from rspf_torch import *
+from torch.utils.data import Dataset, DataLoader
+from sklearn.model_selection import train_test_split
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
@@ -10,25 +12,93 @@ T = 50
 N_p = 2000
 run = 1000
 
-m_data, s_data, o_data = generate_data(T, rspf, batch=run, dyn="Mark")
+m, s, o = generate_data(T, rspf, batch=run, dyn="Mark")
 
 # m_data.to(device)
 # s_data.to(device)
 # o_data.to(device)
 
-m_train = m_data[:950, :]
-m_test = m_data[-50:, :]
-s_train = s_data[:950, :]
-s_test = s_data[-50:, :]
-o_train = o_data[:950, :]
-o_test = o_data[-50:, :]
+m_np = m.numpy().reshape(run, T)
+m_df = pd.DataFrame(m_np)
+m_train, m_test = train_test_split(m_df, test_size=0.05, shuffle=False)
+s_np = s.numpy().reshape(run, T)
+s_df = pd.DataFrame(s_np)
+s_train, s_test = train_test_split(s_df, test_size=0.05, shuffle=False)
+o_np = o.numpy().reshape(run, T)
+o_df = pd.DataFrame(o_np)
+o_train, o_test = train_test_split(o_df, test_size=0.05, shuffle=False)
 
-# dyn=Mark/Poly, prop=Boot/Uni/Deter, re=sys/mul
+m_train.to_csv('m_train')
+s_train.to_csv('s_train')
+o_train.to_csv('o_train')
 
+m_test.to_csv('m_test')
+s_test.to_csv('s_test')
+o_test.to_csv('o_test')
+
+
+class LoadTrainSet(Dataset): 
+    def __init__(self): 
+        m_data = np.loadtxt('./m_train', delimiter=',', dtype=np.int, skiprows=1)
+        self.m = torch.from_numpy(m_data[:900, np.newaxis, 1:])
+        s_data = np.loadtxt('./s_train', delimiter=',', dtype=np.float, skiprows=1)
+        self.s = torch.from_numpy(s_data[:900, np.newaxis, 1:])
+        o_data = np.loadtxt('./o_train', delimiter=',', dtype=np.float, skiprows=1)
+        self.o = torch.from_numpy(o_data[:900, np.newaxis, 1:])
+        self.nums = self.m.shape[0]
+        
+    def __getitem__(self, index): 
+        return self.m[index], self.s[index], self.o[index]
+
+    def __len__(self): 
+        return self.nums
+
+class LoadValSet(Dataset): 
+    def __init__(self): 
+        m_data = np.loadtxt('./m_train', delimiter=',', dtype=np.int, skiprows=1)
+        self.m = torch.from_numpy(m_data[900:, np.newaxis, 1:])
+        s_data = np.loadtxt('./s_train', delimiter=',', dtype=np.float, skiprows=1)
+        self.s = torch.from_numpy(s_data[900:, np.newaxis, 1:])
+        o_data = np.loadtxt('./o_train', delimiter=',', dtype=np.float, skiprows=1)
+        self.o = torch.from_numpy(o_data[900:, np.newaxis, 1:])
+        self.nums = self.m.shape[0]
+        
+    def __getitem__(self, index): 
+        return self.m[index], self.s[index], self.o[index]
+
+    def __len__(self): 
+        return self.nums
+
+class LoadTestSet(Dataset): 
+    def __init__(self): 
+        m_data = np.loadtxt('./m_test', delimiter=',', dtype=np.int, skiprows=1)
+        self.m = torch.from_numpy(m_data[:, np.newaxis, 1:])
+        s_data = np.loadtxt('./s_test', delimiter=',', dtype=np.float, skiprows=1)
+        self.s = torch.from_numpy(s_data[:, np.newaxis, 1:])
+        o_data = np.loadtxt('./o_test', delimiter=',', dtype=np.float, skiprows=1)
+        self.o = torch.from_numpy(o_data[:, np.newaxis, 1:])
+        self.nums = self.m.shape[0]
+        
+    def __getitem__(self, index): 
+        return self.m[index], self.s[index], self.o[index]
+
+    def __len__(self): 
+        return self.nums
+
+trainingset = LoadTrainSet()
+train_data = DataLoader(dataset=trainingset, batch_size=50, shuffle=True)
+validationset = LoadValSet()
+val_data = DataLoader(dataset=validationset, batch_size=50, shuffle=True)
+
+
+# # dyn=Mark/Poly, prop=Boot/Uni/Deter, re=sys/mul
 rsdpf = RSDPF(P, beta=beta)
-rsdpf.training(m_train[:, :, [0]], s_train[:, :, [0]], o_train)
-# m_parlist, s_parlist, w_parlist = filtering(rspf, o_data.reshape(run, -1), N_p=N_p, dyn="Mark", prop="Boot", re="mul")
-# mse, mse_cum = MSE(s_parlist, s_data.reshape(run, T), w_parlist)
-rsdpf.testing(m_test[:, :, [0]], s_test[:, :, [0]], o_test)
+
+rsdpf.training(train_data, val_data)
+# # m_parlist, s_parlist, w_parlist = filtering(rspf, o_data.reshape(run, -1), N_p=N_p, dyn="Mark", prop="Boot", re="mul")
+# # mse, mse_cum = MSE(s_parlist, s_data.reshape(run, T), w_parlist)
+testset = LoadTestSet()
+test_data = DataLoader(dataset=testset, batch_size=50, shuffle=True)
+rsdpf.testing(test_data)
 
 

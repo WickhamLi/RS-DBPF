@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 import torch.nn as nn
+import pandas as pd
+import math
 from matplotlib import pyplot as plt
 from scipy import stats
 
@@ -24,8 +26,8 @@ class RSDPF():
     def filtering(self, model, m, s, o, N_p, dyn, prop, re): 
         batch, _, T = o.shape
         m_list = torch.zeros(batch, N_p, T, dtype=int)
-        s_list = torch.zeros(batch, N_p, T)
-        w_list = torch.zeros(batch, N_p, T)
+        s_list = torch.zeros(batch, N_p, T).to(device)
+        w_list = torch.zeros(batch, N_p, T).to(device)
         m_list[:, :, 0], s_list[:, :, 0] = model.initial(size=(batch, N_p))
         # m_list[:, :, [0]] = m
         # s_list[:, :, [0]] = s
@@ -54,7 +56,7 @@ class RSDPF():
             ESS = 1 / (w_list[:, :, t]**2).sum(dim=1) < s_list.size()[1]
     #         print(ESS)
             if ESS.sum(): 
-                index = torch.arange(N_p).tile(batch, 1)
+                index = torch.arange(N_p).tile(batch, 1).to(device)
                 if re=="sys": 
                     re_index = torch.where(ESS)[0]
                     index[re_index, :] = resample_systematic(w_list[re_index, :, t])
@@ -84,41 +86,51 @@ class RSDPF():
         return s_est
 
 
-    def training(self, m_data, s_data, o_data, N_iter=50, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
-        # s_data, o_data = data
+    def training(self, train_data, val_data, N_iter=10, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
+        N_step = len(train_data)
         l = np.zeros(N_iter)
         for epoch in range(N_iter): 
-            s_est = self.forward(m_data, s_data, o_data, N_p, dyn, prop, re)
-            loss = ((s_est - s_data)**2).mean()
-            loss.requires_grad_(True)
-            loss.backward()
-            l[epoch] = loss
+            for i, (m_data, s_data, o_data) in enumerate(train_data): 
+                s_est = self.forward(m_data[:, :, [0]], s_data[:, :, [0]], o_data, N_p, dyn, prop, re)
+                loss = ((s_est - s_data.to(device))**2).mean()
+                loss.requires_grad_(True)
+                loss.backward()
+                l[epoch] = loss
 
-            self.optim.step()
-            self.optim.zero_grad()
+                self.optim.step()
+                self.optim.zero_grad()
+                print(f'epoch{epoch+1}/{N_iter}, step{i+1}/{N_step}: training loss = {loss:.8f}')
+
+            with torch.no_grad(): 
+                for m_val, s_val, o_val in val_data: 
+                    s_est = self.forward(m_val[:, :, [0]], s_val[:, :, [0]], o_val, N_p, dyn, prop, re)
+                    loss = ((s_est - s_val.to(device))**2).mean()
         
-            print(f'epoch{epoch+1}: loss = {loss:.8f}')
+            print(f'epoch{epoch+1}/{N_iter}: validation loss = {loss:.8f}')
+
+        
         plt.plot(l)
         plt.show()
 
-    def testing(self, m_data, s_data, o_data, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
-        s_est = self.forward(m_data, s_data, o_data, N_p, dyn, prop, re)
-        loss = self.loss(s_est, s_data)
-        print(f'loss = {loss:.8f}')
-        mse = ((s_est - s_data)**2).detach().numpy()
-        mse_cum = mse.cumsum(axis=-1)
-        plt.plot(mse_cum.mean(axis=0)[-1], label='RSPF(Bootstrap)')
-        plt.ylabel('Average Cumulative MSE')
-        plt.xlabel('Time Step')
-        plt.yscale('log')
-        plt.legend()
-        plt.tight_layout()
-        # plt.savefig('RSPFMark.png')
-        plt.show()
+    def testing(self, test_data, N_p=2000, dyn="Mark", prop="Boot", re="mul"): 
+        for m_test, s_test, o_test in test_data: 
+            s_est = self.forward(m_test[:, :, [0]], s_test[:, :, [0]], o_test, N_p, dyn, prop, re)
+            loss = ((s_est - s_test.to(device))**2).mean()
+            print(f'test loss = {loss:.8f}')
+            mse = ((s_est - s_test)**2).detach().numpy()
+            mse_cum = mse.cumsum(axis=-1)
+            plt.plot(mse_cum.mean(axis=0)[-1], label='RSPF(Bootstrap)')
+            plt.ylabel('Average Cumulative MSE')
+            plt.xlabel('Time Step')
+            plt.yscale('log')
+            plt.legend()
+            plt.tight_layout()
+            # plt.savefig('RSPFMark.png')
+            plt.show()
 
 
-        print(mse_cum.mean(axis=0)[-1][-1])
-        print(mse.mean(), mse.max(), mse.min())
+            print(mse_cum.mean(axis=0)[-1][-1])
+            print(mse.mean(), mse.max(), mse.min())
 
 
         
@@ -174,7 +186,7 @@ class RSPF:
         return m_t
         
     def state(self, m_t, s_p): 
-        x = self.co_A[m_t] * s_p + self.co_B[m_t] + torch.normal(mean=self.mu_u, std=self.sigma_u, size=s_p.size())
+        x = self.co_A[m_t].to(device) * s_p.to(device) + self.co_B[m_t].to(device) + torch.normal(mean=self.mu_u, std=self.sigma_u, size=s_p.size()).to(device)
         return x
         
     def obs(self, m_t, s_t): 
@@ -217,9 +229,9 @@ def generate_data(T, model, batch=1, dyn="Mark"):
     return m, s, o
 
 def weights_bootstrap(model, w_list, m_list, s_list, o): 
-    lw = torch.log(w_list)
-    o = torch.ones(s_list.size()) * o
-    o -= (model.co_C[m_list] * torch.sqrt(torch.abs(s_list)) + model.co_D[m_list])
+    lw = torch.log(w_list).to(device)
+    o = torch.ones(s_list.size()).to(device) * o.to(device)
+    o -= (model.co_C[m_list].to(device) * torch.sqrt(torch.abs(s_list)).to(device) + model.co_D[m_list].to(device))
     lw += torch.distributions.normal.Normal(loc=0., scale=0.1**(0.5)).log_prob(o)
 #     for i in range(len(s_list)): 
 #         lw[i] += stats.norm(loc=model.co_C[m_list[i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[i]], scale=np.sqrt(0.1)).logpdf(o)
@@ -256,10 +268,10 @@ def weights_proposal(model, w_list, m_list, s_list, o, dyn):
 
 
 def inv_cdf(cum, ws): 
-    index = torch.ones(ws.size(), dtype=int) * cum.size()[-1]
-    w_cum = ws.cumsum(axis=1).clone().detach()
+    index = torch.ones(ws.size(), dtype=int).to(device) * cum.size()[-1]
+    w_cum = ws.cumsum(axis=1).clone().detach().to(device)
     for i in range(cum.size()[-1]): 
-        index[:, [i]] -= (cum[:, [i]] < w_cum).sum(dim=1, keepdim=True)
+        index[:, [i]] -= (cum[:, [i]].to(device) < w_cum).sum(dim=1, keepdim=True)
         # while cum[i] > w: 
         #     k += 1
         #     w += ws[k]
