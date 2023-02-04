@@ -21,16 +21,16 @@ class RSDPF():
         self.loss = nn.MSELoss()
         self.optim = torch.optim.Adam([self.co_A, self.co_B, self.co_C, self.co_D], lr = learning_rate)
 
-    def filtering(self, model, o, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
+    def filtering(self, model, m, s, o, N_p, dyn, prop, re): 
         batch, _, T = o.shape
         m_list = torch.zeros(batch, N_p, T, dtype=int)
         s_list = torch.zeros(batch, N_p, T)
         w_list = torch.zeros(batch, N_p, T)
         m_list[:, :, 0], s_list[:, :, 0] = model.initial(size=(batch, N_p))
-        s_list_re = s_list.clone().detach()
+        # m_list[:, :, [0]] = m
+        # s_list[:, :, [0]] = s
         m_list_re = m_list.clone().detach()
-        # m_list[0, :] = m
-        # s_list[0, :] = s
+        s_list_re = s_list.clone().detach()
         w_list[:, :, 0] = 1/N_p
         w_list_re = w_list.clone().detach()
         for t in range(1, T): 
@@ -77,18 +77,18 @@ class RSDPF():
         return m_list, s_list, w_list
 
 
-    def forward(self, o_data, N_p, dyn, prop, re):  
+    def forward(self, m_data, s_data, o_data, N_p, dyn, prop, re):  
         model = RSPF(self.mat_P, self.co_A, self.co_B, self.co_C, self.co_D, beta=self.beta)
-        m_parlist, s_parlist, w_parlist = self.filtering(model, o_data, N_p=N_p, dyn=dyn, prop=prop, re=re)
-        s_est = (w_parlist * s_parlist).sum(dim=1)
+        m_parlist, s_parlist, w_parlist = self.filtering(model, m_data, s_data, o_data, N_p=N_p, dyn=dyn, prop=prop, re=re)
+        s_est = (w_parlist * s_parlist).sum(dim=1, keepdim=True)
         return s_est
 
 
-    def training(self, s_data, o_data, N_iter=100, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
+    def training(self, m_data, s_data, o_data, N_iter=50, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
         # s_data, o_data = data
         l = np.zeros(N_iter)
         for epoch in range(N_iter): 
-            s_est = self.forward(o_data, N_p, dyn, prop, re)
+            s_est = self.forward(m_data, s_data, o_data, N_p, dyn, prop, re)
             loss = ((s_est - s_data)**2).mean()
             loss.requires_grad_(True)
             loss.backward()
@@ -98,15 +98,16 @@ class RSDPF():
             self.optim.zero_grad()
         
             print(f'epoch{epoch+1}: loss = {loss:.8f}')
-        return l
+        plt.plot(l)
+        plt.show()
 
-    def testing(self, s_data, o_data, loss, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
-        s_est = self.forward(o_data, N_p, dyn, prop, re)
+    def testing(self, m_data, s_data, o_data, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
+        s_est = self.forward(m_data, s_data, o_data, N_p, dyn, prop, re)
         loss = self.loss(s_est, s_data)
         print(f'loss = {loss:.8f}')
-        mse = (s_est - s_data)**2
-        mse_cum = mse.cumsum(dim=-1)
-        plt.plot(mse_cum.mean(dim=0), label='RSPF(Bootstrap)')
+        mse = ((s_est - s_data)**2).detach().numpy()
+        mse_cum = mse.cumsum(axis=-1)
+        plt.plot(mse_cum.mean(axis=0)[-1], label='RSPF(Bootstrap)')
         plt.ylabel('Average Cumulative MSE')
         plt.xlabel('Time Step')
         plt.yscale('log')
@@ -115,10 +116,8 @@ class RSDPF():
         # plt.savefig('RSPFMark.png')
         plt.show()
 
-        plt.plot(loss)
-        plt.show()
 
-        print(mse_cum.mean(dim=0)[-1])
+        print(mse_cum.mean(axis=0)[-1][-1])
         print(mse.mean(), mse.max(), mse.min())
 
 
@@ -258,7 +257,7 @@ def weights_proposal(model, w_list, m_list, s_list, o, dyn):
 
 def inv_cdf(cum, ws): 
     index = torch.ones(ws.size(), dtype=int) * cum.size()[-1]
-    w_cum = ws.cumsum(axis=1)
+    w_cum = ws.cumsum(axis=1).clone().detach()
     for i in range(cum.size()[-1]): 
         index[:, [i]] -= (cum[:, [i]] < w_cum).sum(dim=1, keepdim=True)
         # while cum[i] > w: 
