@@ -39,11 +39,11 @@ o_test.to_csv('o_test')
 
 class LoadTrainSet(Dataset): 
     def __init__(self): 
-        m_data = np.loadtxt('./m_train', delimiter=',', dtype=np.int, skiprows=1)
+        m_data = np.loadtxt('./m_train', delimiter=',', skiprows=1)
         self.m = torch.from_numpy(m_data[:900, np.newaxis, 1:])
-        s_data = np.loadtxt('./s_train', delimiter=',', dtype=np.float, skiprows=1)
+        s_data = np.loadtxt('./s_train', delimiter=',', skiprows=1)
         self.s = torch.from_numpy(s_data[:900, np.newaxis, 1:])
-        o_data = np.loadtxt('./o_train', delimiter=',', dtype=np.float, skiprows=1)
+        o_data = np.loadtxt('./o_train', delimiter=',', skiprows=1)
         self.o = torch.from_numpy(o_data[:900, np.newaxis, 1:])
         self.nums = self.m.shape[0]
         
@@ -55,11 +55,11 @@ class LoadTrainSet(Dataset):
 
 class LoadValSet(Dataset): 
     def __init__(self): 
-        m_data = np.loadtxt('./m_train', delimiter=',', dtype=np.int, skiprows=1)
+        m_data = np.loadtxt('./m_train', delimiter=',', skiprows=1)
         self.m = torch.from_numpy(m_data[900:, np.newaxis, 1:])
-        s_data = np.loadtxt('./s_train', delimiter=',', dtype=np.float, skiprows=1)
+        s_data = np.loadtxt('./s_train', delimiter=',', skiprows=1)
         self.s = torch.from_numpy(s_data[900:, np.newaxis, 1:])
-        o_data = np.loadtxt('./o_train', delimiter=',', dtype=np.float, skiprows=1)
+        o_data = np.loadtxt('./o_train', delimiter=',', skiprows=1)
         self.o = torch.from_numpy(o_data[900:, np.newaxis, 1:])
         self.nums = self.m.shape[0]
         
@@ -71,11 +71,11 @@ class LoadValSet(Dataset):
 
 class LoadTestSet(Dataset): 
     def __init__(self): 
-        m_data = np.loadtxt('./m_test', delimiter=',', dtype=np.int, skiprows=1)
+        m_data = np.loadtxt('./m_test', delimiter=',', skiprows=1)
         self.m = torch.from_numpy(m_data[:, np.newaxis, 1:])
-        s_data = np.loadtxt('./s_test', delimiter=',', dtype=np.float, skiprows=1)
+        s_data = np.loadtxt('./s_test', delimiter=',', skiprows=1)
         self.s = torch.from_numpy(s_data[:, np.newaxis, 1:])
-        o_data = np.loadtxt('./o_test', delimiter=',', dtype=np.float, skiprows=1)
+        o_data = np.loadtxt('./o_test', delimiter=',', skiprows=1)
         self.o = torch.from_numpy(o_data[:, np.newaxis, 1:])
         self.nums = self.m.shape[0]
         
@@ -93,12 +93,10 @@ val_data = DataLoader(dataset=validationset, batch_size=50, shuffle=True)
 
 # # dyn=Mark/Poly, prop=Boot/Uni/Deter, re=sys/mul
 rsdpf = RSDPF(P, beta=beta)
+rsdpf.training(train_data, val_data, dyn="Mark")
 
-rsdpf.training(train_data, val_data)
-# # m_parlist, s_parlist, w_parlist = filtering(rspf, o_data.reshape(run, -1), N_p=N_p, dyn="Mark", prop="Boot", re="mul")
-# # mse, mse_cum = MSE(s_parlist, s_data.reshape(run, T), w_parlist)
 testset = LoadTestSet()
 test_data = DataLoader(dataset=testset, batch_size=50, shuffle=True)
-rsdpf.testing(test_data)
+rsdpf.testing(test_data, A, B, C, D, dyn="Mark")
 
 

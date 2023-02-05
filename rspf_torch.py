@@ -6,10 +6,11 @@ import math
 from matplotlib import pyplot as plt
 from scipy import stats
 
-device = torch.device('cuda') if torch.cuda.is_available else torch.device('cpu')
+# device = torch.device('mps') if torch.backends.mps.is_available else torch.device('cpu')
+device = torch.device('cpu')
 
 class RSDPF(): 
-    def __init__(self, tran_matrix, beta=torch.Tensor([1]), learning_rate=0.001): 
+    def __init__(self, tran_matrix, beta=torch.Tensor([1]), learning_rate=1e-4): 
         self.mat_P = tran_matrix
         self.beta = beta
         self.co_A = torch.Tensor(self.mat_P.size()[-1]).uniform_(-1, 1)
@@ -20,8 +21,19 @@ class RSDPF():
         self.co_C.requires_grad_(True)
         self.co_D = self.co_B.clone().detach()
         self.co_D.requires_grad_(True)
+        self.sigma_u = torch.Tensor(1).uniform_(0.1, 0.5)
+        self.sigma_u.requires_grad_(True)
+        self.sigma_v = torch.Tensor(1).uniform_(0.1, 0.5)
+        self.sigma_v.requires_grad_(True)
+        # self.co_A = A
+        # self.co_B = B
+        # self.co_C = C
+        # self.co_D = D
+        # self.sigma_u = sigma_u
+        # self.sigma_v = sigma_v
         self.loss = nn.MSELoss()
-        self.optim = torch.optim.Adam([self.co_A, self.co_B, self.co_C, self.co_D], lr = learning_rate)
+        self.optim = torch.optim.SGD([self.co_A, self.co_B, self.co_C, self.co_D], lr = learning_rate, momentum=0.9)
+        self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[5*(1+x) for x in range(10)], gamma=0.6)
 
     def filtering(self, model, m, s, o, N_p, dyn, prop, re): 
         batch, _, T = o.shape
@@ -80,57 +92,76 @@ class RSDPF():
 
 
     def forward(self, m_data, s_data, o_data, N_p, dyn, prop, re):  
-        model = RSPF(self.mat_P, self.co_A, self.co_B, self.co_C, self.co_D, beta=self.beta)
+        model = RSPF(self.mat_P, self.co_A, self.co_B, self.co_C, self.co_D, sigma_u=self.sigma_u, sigma_v=self.sigma_v, beta=self.beta)
         m_parlist, s_parlist, w_parlist = self.filtering(model, m_data, s_data, o_data, N_p=N_p, dyn=dyn, prop=prop, re=re)
         s_est = (w_parlist * s_parlist).sum(dim=1, keepdim=True)
         return s_est
 
 
-    def training(self, train_data, val_data, N_iter=10, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
+    def training(self, train_data, val_data, N_iter=40, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
         N_step = len(train_data)
         l = np.zeros(N_iter)
         for epoch in range(N_iter): 
             for i, (m_data, s_data, o_data) in enumerate(train_data): 
                 s_est = self.forward(m_data[:, :, [0]], s_data[:, :, [0]], o_data, N_p, dyn, prop, re)
-                loss = ((s_est - s_data.to(device))**2).mean()
-                loss.requires_grad_(True)
+                loss_sample = ((s_est - s_data.to(device))**2).mean(dim=2, keepdim=True)
+                loss = loss_sample.mean(dim=0, keepdim=True)
+                # loss.requires_grad_(True)
                 loss.backward()
-                l[epoch] = loss
 
                 self.optim.step()
                 self.optim.zero_grad()
-                print(f'epoch{epoch+1}/{N_iter}, step{i+1}/{N_step}: training loss = {loss:.8f}')
-
+                print(f'epoch{epoch+1}/{N_iter}, step{i+1}/{N_step}: training loss = {loss.item():.8f}')
+            self.optim_scheduler.step()
             with torch.no_grad(): 
                 for m_val, s_val, o_val in val_data: 
                     s_est = self.forward(m_val[:, :, [0]], s_val[:, :, [0]], o_val, N_p, dyn, prop, re)
                     loss = ((s_est - s_val.to(device))**2).mean()
+                    l[epoch] = loss
         
             print(f'epoch{epoch+1}/{N_iter}: validation loss = {loss:.8f}')
 
         
-        plt.plot(l)
+        plt.plot(l, label='Loss Gradient Descent')
+        plt.ylabel('Evluation Loss')
+        plt.xlabel('Epoch')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig('loss.png')
         plt.show()
 
-    def testing(self, test_data, N_p=2000, dyn="Mark", prop="Boot", re="mul"): 
+    def testing(self, test_data, A, B, C, D, N_p=2000, dyn="Mark", prop="Boot", re="mul"): 
         for m_test, s_test, o_test in test_data: 
             s_est = self.forward(m_test[:, :, [0]], s_test[:, :, [0]], o_test, N_p, dyn, prop, re)
             loss = ((s_est - s_test.to(device))**2).mean()
-            print(f'test loss = {loss:.8f}')
+            print(f'DPF test loss = {loss:.8f}')
             mse = ((s_est - s_test)**2).detach().numpy()
             mse_cum = mse.cumsum(axis=-1)
-            plt.plot(mse_cum.mean(axis=0)[-1], label='RSPF(Bootstrap)')
+
+            rspf = RSPF(self.mat_P, A, B, C, D, beta=self.beta)
+            m_parlist, s_parlist, w_parlist = self.filtering(rspf, m_test[:, :, [0]], s_test[:, :, [0]], o_test, N_p=N_p, dyn=dyn, prop=prop, re=re)
+            s_pfest = (w_parlist * s_parlist).sum(dim=1, keepdim=True)
+            loss = ((s_pfest - s_test.to(device))**2).mean()
+            print(f'PF test loss = {loss:.8f}')
+            mse_pf = ((s_pfest - s_test)**2).detach().numpy()
+            mse_cum_pf = mse_pf.cumsum(axis=-1)
+
+            plt.cla()
+            plt.plot(mse_cum.mean(axis=0)[-1], label=f'RSDPF({dyn}/{prop}/{re})')
+            plt.plot(mse_cum_pf.mean(axis=0)[-1], label=f'RSPF({dyn}/{prop}/{re})')
             plt.ylabel('Average Cumulative MSE')
             plt.xlabel('Time Step')
             plt.yscale('log')
             plt.legend()
             plt.tight_layout()
-            # plt.savefig('RSPFMark.png')
+            plt.savefig(f'Comparison({dyn}{prop}{re})')
             plt.show()
 
 
             print(mse_cum.mean(axis=0)[-1][-1])
+            print(mse_cum_pf.mean(axis=0)[-1][-1])
             print(mse.mean(), mse.max(), mse.min())
+            print(mse_pf.mean(), mse_pf.max(), mse_pf.min())
 
 
         
@@ -186,8 +217,7 @@ class RSPF:
         return m_t
         
     def state(self, m_t, s_p): 
-        x = self.co_A[m_t].to(device) * s_p.to(device) + self.co_B[m_t].to(device) + torch.normal(mean=self.mu_u, std=self.sigma_u, size=s_p.size()).to(device)
-        return x
+        return self.co_A[m_t].to(device) * s_p.to(device) + self.co_B[m_t].to(device) + torch.normal(mean=self.mu_u, std=1., size=s_p.size()).to(device) * self.sigma_u
         
     def obs(self, m_t, s_t): 
         return self.co_C[m_t] * torch.sqrt(torch.abs(s_t)) + self.co_D[m_t] + torch.normal(mean=self.mu_v, std=self.sigma_v, size=s_t.size())
@@ -231,8 +261,9 @@ def generate_data(T, model, batch=1, dyn="Mark"):
 def weights_bootstrap(model, w_list, m_list, s_list, o): 
     lw = torch.log(w_list).to(device)
     o = torch.ones(s_list.size()).to(device) * o.to(device)
-    o -= (model.co_C[m_list].to(device) * torch.sqrt(torch.abs(s_list)).to(device) + model.co_D[m_list].to(device))
-    lw += torch.distributions.normal.Normal(loc=0., scale=0.1**(0.5)).log_prob(o)
+    s_obs = s_list.clone().detach()
+    o -= (model.co_C[m_list].to(device) * torch.sqrt(torch.abs(s_obs)).to(device) + model.co_D[m_list].to(device))
+    lw += torch.distributions.normal.Normal(loc=0., scale=model.sigma_v).log_prob(o)
 #     for i in range(len(s_list)): 
 #         lw[i] += stats.norm(loc=model.co_C[m_list[i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[i]], scale=np.sqrt(0.1)).logpdf(o)
 # #         w += 10**(-300)
