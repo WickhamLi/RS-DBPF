@@ -1,10 +1,8 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import pandas as pd
-import math
 from matplotlib import pyplot as plt
-from scipy import stats
+from utils import *
 
 # device = torch.device('mps') if torch.backends.mps.is_available else torch.device('cpu')
 device = torch.device('cpu')
@@ -14,8 +12,10 @@ class RSDPF():
         self.mat_P = tran_matrix
         self.beta = beta
         self.co_A = torch.Tensor(self.mat_P.size()[-1]).uniform_(-1, 1)
+        # self.co_A = torch.Tensor([np.random.uniform(-1, 1)]*self.mat_P.size()[-1])
         self.co_A.requires_grad_(True)
         self.co_B = torch.Tensor(self.mat_P.size()[-1]).uniform_(-4, 4)
+        # self.co_B = torch.Tensor([np.random.uniform(-1, 1)]*self.mat_P.size()[-1])
         self.co_B.requires_grad_(True)
         self.co_C = self.co_A.clone().detach()
         self.co_C.requires_grad_(True)
@@ -25,15 +25,9 @@ class RSDPF():
         self.sigma_u.requires_grad_(True)
         self.sigma_v = torch.Tensor(1).uniform_(0.1, 0.5)
         self.sigma_v.requires_grad_(True)
-        # self.co_A = A
-        # self.co_B = B
-        # self.co_C = C
-        # self.co_D = D
-        # self.sigma_u = sigma_u
-        # self.sigma_v = sigma_v
         self.loss = nn.MSELoss()
         self.optim = torch.optim.SGD([self.co_A, self.co_B, self.co_C, self.co_D], lr = learning_rate, momentum=0.9)
-        self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[5*(1+x) for x in range(10)], gamma=0.6)
+        self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[5*(1+x) for x in range(10)], gamma=0.7)
 
     def filtering(self, model, m, s, o, N_p, dyn, prop, re): 
         batch, _, T = o.shape
@@ -98,9 +92,9 @@ class RSDPF():
         return s_est
 
 
-    def training(self, train_data, val_data, N_iter=40, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
+    def training(self, train_data, val_data, N_iter=40, N_p=2000, dyn="Mark", prop="Boot", re="mul"): 
         N_step = len(train_data)
-        l = np.zeros(N_iter)
+        l = np.ones(N_iter) * 1e2
         for epoch in range(N_iter): 
             for i, (m_data, s_data, o_data) in enumerate(train_data): 
                 s_est = self.forward(m_data[:, :, [0]], s_data[:, :, [0]], o_data, N_p, dyn, prop, re)
@@ -117,60 +111,51 @@ class RSDPF():
                 for m_val, s_val, o_val in val_data: 
                     s_est = self.forward(m_val[:, :, [0]], s_val[:, :, [0]], o_val, N_p, dyn, prop, re)
                     loss = ((s_est - s_val.to(device))**2).mean()
+                    if loss.item() < l.min(): 
+                        torch.save(self, './results/best_val')
                     l[epoch] = loss
         
             print(f'epoch{epoch+1}/{N_iter}: validation loss = {loss:.8f}')
-
         
         plt.plot(l, label='Loss Gradient Descent')
-        plt.ylabel('Evluation Loss')
+        plt.ylabel('Validation Loss')
         plt.xlabel('Epoch')
         plt.legend()
         plt.tight_layout()
-        plt.savefig('loss.png')
+        plt.savefig(f'./figures/loss:{dyn}{prop}{re}.png')
         plt.show()
+        return l
 
     def testing(self, test_data, A, B, C, D, N_p=2000, dyn="Mark", prop="Boot", re="mul"): 
-        for m_test, s_test, o_test in test_data: 
-            s_est = self.forward(m_test[:, :, [0]], s_test[:, :, [0]], o_test, N_p, dyn, prop, re)
-            loss = ((s_est - s_test.to(device))**2).mean()
-            print(f'DPF test loss = {loss:.8f}')
-            mse = ((s_est - s_test)**2).detach().numpy()
-            mse_cum = mse.cumsum(axis=-1)
+        rsdpf = torch.load('./results/best_val')
+        rspf = RSPF(self.mat_P, A, B, C, D, beta=self.beta)
+        with torch.no_grad(): 
+            for m_test, s_test, o_test in test_data: 
+                s_estdpf = rsdpf.forward(m_test[:, :, [0]], s_test[:, :, [0]], o_test, N_p, dyn, prop, re)
+                loss_dpf = ((s_estdpf - s_test.to(device))**2).mean()
+                print(f'DPF test loss = {loss_dpf.item():.8f}')
+                mse_dpf = ((s_estdpf - s_test)**2).detach().numpy()
+                msecum_dpf = mse_dpf.cumsum(axis=-1)
 
-            rspf = RSPF(self.mat_P, A, B, C, D, beta=self.beta)
-            m_parlist, s_parlist, w_parlist = self.filtering(rspf, m_test[:, :, [0]], s_test[:, :, [0]], o_test, N_p=N_p, dyn=dyn, prop=prop, re=re)
-            s_pfest = (w_parlist * s_parlist).sum(dim=1, keepdim=True)
-            loss = ((s_pfest - s_test.to(device))**2).mean()
-            print(f'PF test loss = {loss:.8f}')
-            mse_pf = ((s_pfest - s_test)**2).detach().numpy()
-            mse_cum_pf = mse_pf.cumsum(axis=-1)
+                m_parlist, s_parlist, w_parlist = self.filtering(rspf, m_test[:, :, [0]], s_test[:, :, [0]], o_test, N_p=N_p, dyn=dyn, prop=prop, re=re)
+                s_estpf = (w_parlist * s_parlist).sum(dim=1, keepdim=True)
+                loss = ((s_estpf - s_test.to(device))**2).mean()
+                print(f'PF test loss = {loss:.8f}')
+                mse_pf = ((s_estpf - s_test)**2).detach().numpy()
+                msecum_pf = mse_pf.cumsum(axis=-1)
 
-            plt.cla()
-            plt.plot(mse_cum.mean(axis=0)[-1], label=f'RSDPF({dyn}/{prop}/{re})')
-            plt.plot(mse_cum_pf.mean(axis=0)[-1], label=f'RSPF({dyn}/{prop}/{re})')
-            plt.ylabel('Average Cumulative MSE')
-            plt.xlabel('Time Step')
-            plt.yscale('log')
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(f'Comparison({dyn}{prop}{re})')
-            plt.show()
+                plt.cla()
+                plt.plot(msecum_dpf.mean(axis=0)[-1], label=f'RSDPF({dyn}/{prop}/{re})')
+                plt.plot(msecum_pf.mean(axis=0)[-1], label=f'RSPF({dyn}/{prop}/{re})')
+                plt.ylabel('Average Cumulative MSE')
+                plt.xlabel('Time Step')
+                plt.yscale('log')
+                plt.legend()
+                plt.tight_layout()
+                plt.savefig(f'./figures/Comparison({dyn}{prop}{re})')
+                plt.show()
 
-
-            print(mse_cum.mean(axis=0)[-1][-1])
-            print(mse_cum_pf.mean(axis=0)[-1][-1])
-            print(mse.mean(), mse.max(), mse.min())
-            print(mse_pf.mean(), mse_pf.max(), mse_pf.min())
-
-
-        
-
-# def MSE(s_list, s, w_list): 
-#     s_est = (w_list * s_list).sum(dim=1)
-#     mse = (s_est - s)**2
-#     mse_cum = mse.cumsum(dim=-1)
-#     return mse, mse_cum
+        return np.squeeze(mse_dpf), np.squeeze(mse_pf)
 
 
 class RSPF: 
@@ -221,108 +206,7 @@ class RSPF:
         
     def obs(self, m_t, s_t): 
         return self.co_C[m_t] * torch.sqrt(torch.abs(s_t)) + self.co_D[m_t] + torch.normal(mean=self.mu_v, std=self.sigma_v, size=s_t.size())
-        
 
-def create_parameters(N_m=8): 
-    P = torch.zeros(N_m, N_m)
-    for i in range(N_m): 
-        if not i: 
-            P += torch.diag(torch.Tensor([0.80]*N_m), i)
-        elif i==1: 
-            P += torch.diag(torch.Tensor([0.15]*(8-i)), i)
-            P += torch.diag(torch.Tensor([0.15]*i), i-8)
-        else: 
-            P += torch.diag(torch.Tensor([1/120]*(8-i)), i)
-            P += torch.diag(torch.Tensor([1/120]*i), i-8)
-
-    A = torch.Tensor([-0.1, -0.3, -0.5, -0.9, 0.1, 0.3, 0.5, 0.9])
-    B = torch.Tensor([0., -2., 2., -4., 0., 2., -2., 4.])
-    C = A.clone()
-    D = B.clone()
-    beta = torch.Tensor([1]*N_m)
-    return P, A, B, C, D, beta
-
-def generate_data(T, model, batch=1, dyn="Mark"): 
-    m = torch.zeros(batch, 1, T, dtype=int)
-    s = torch.zeros(batch, 1, T)
-    o = torch.zeros(batch, 1, T)
-    m[:, :, 0], s[:, :, 0] = model.initial(size=(batch, 1))
-    o[:, :, 0] = model.obs(m[:, :, 0], s[:, :, 0])
-    for t in range(1, T):
-        if dyn=="Poly": 
-            m[:, :, t] = model.Polyaurn_dynamic(m[:, :, :t])
-        else: 
-            m[:, :, t] = model.Markov_dynamic(m[:, :, t-1])
-        s[:, :, t] = model.state(m[:, :, t], s[:, :, t-1])
-        o[:, :, t] = model.obs(m[:, :, t], s[:, :, t])
-
-    return m, s, o
-
-def weights_bootstrap(model, w_list, m_list, s_list, o): 
-    lw = torch.log(w_list).to(device)
-    o = torch.ones(s_list.size()).to(device) * o.to(device)
-    s_obs = s_list.clone().detach()
-    o -= (model.co_C[m_list].to(device) * torch.sqrt(torch.abs(s_obs)).to(device) + model.co_D[m_list].to(device))
-    lw += torch.distributions.normal.Normal(loc=0., scale=model.sigma_v).log_prob(o)
-#     for i in range(len(s_list)): 
-#         lw[i] += stats.norm(loc=model.co_C[m_list[i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[i]], scale=np.sqrt(0.1)).logpdf(o)
-# #         w += 10**(-300)
-    w = torch.exp(lw - lw.max(dim=1, keepdim=True)[0])
-    return w/w.sum(dim=1, keepdim=True)
-
-def weights_proposal(model, w_list, m_list, s_list, o, dyn): 
-    lw = torch.log(w_list)
-    o = torch.ones(s_list.size()) * o
-    o -= (model.co_C[m_list[:, :, -1]] * torch.sqrt(torch.abs(s_list)) + model.co_D[m_list[:, :, -1]])
-    if dyn=="Mark": 
-        lp = torch.log(model.mat_P[m_list[:, :, -2], m_list[:, :, -1]])
-    else: 
-        batch = m_list.size()[0]
-        N_p = m_list.size()[1]
-        alpha = torch.zeros(batch, N_p, len(model.beta))
-        for m_index in range(len(model.beta)): 
-            alpha[:, :, m_index] = torch.sum(m_list[:, :, :-1] == m_index, dim=2)
-        beta = model.beta[None, None, :]
-        prob = (alpha + beta)/(alpha + beta).sum(dim=2, keepdim=True)
-        batch_index = tuple(i//N_p for i in range(batch * N_p))
-        pars_index = tuple([i for i in range(N_p)] * batch)
-        index_flatten = tuple(m_list[:, :, -1].view(-1))
-        lp = torch.log(prob[batch_index, pars_index, index_flatten].view(batch, N_p))
-
-    lw += torch.distributions.normal.Normal(loc=0., scale=0.1**(0.5)).log_prob(o) + lp - torch.log((1/len(model.co_A)))
-    # for i in range(len(s_list)): 
-    #     lw[i] += stats.norm(loc=model.co_C[m_list[-1, i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[-1, i]], scale=np.sqrt(0.1)).logpdf(o) + lp[i] - np.log((1/len(model.co_A)))
-#         w += 10**(-300)
-#         print(lw[i])
-    w = torch.exp(lw - lw.max(dim=1, keepdim=True)[0])
-    return w/w.sum(dim=1, keepdim=True)
-
-
-def inv_cdf(cum, ws): 
-    index = torch.ones(ws.size(), dtype=int).to(device) * cum.size()[-1]
-    w_cum = ws.cumsum(axis=1).clone().detach().to(device)
-    for i in range(cum.size()[-1]): 
-        index[:, [i]] -= (cum[:, [i]].to(device) < w_cum).sum(dim=1, keepdim=True)
-        # while cum[i] > w: 
-        #     k += 1
-        #     w += ws[k]
-        # index[i] = k
-    index = torch.where(index < ws.shape[-1], index, ws.shape[-1]-1)
-    return index
-    
-
-def resample_systematic(ws): 
-    batch, N_p = ws.size()
-    cum = (torch.rand(batch, 1) + torch.arange(N_p).tile(batch, 1)) / torch.ones(batch, 1)*N_p   
-    
-    return inv_cdf(cum, ws)
-    
-def resample_multinomial(ws): 
-    batch, N_p = ws.size()
-    uni = (-torch.log(torch.rand(batch, N_p+1, dtype=torch.double))).cumsum(dim=1)
-    cum = uni[:, :-1] / uni[:, [-1]]
-
-    return inv_cdf(cum, ws)
 
 
 
