@@ -4,11 +4,11 @@ import torch.nn as nn
 from matplotlib import pyplot as plt
 from utils import *
 
-# device = torch.device('mps') if torch.backends.mps.is_available else torch.device('cpu')
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
 device = torch.device('cpu')
 
 class RSDPF(): 
-    def __init__(self, tran_matrix, beta=torch.Tensor([1]), learning_rate=1e-4): 
+    def __init__(self, tran_matrix, beta=torch.Tensor([1]), learning_rate=1e-3): 
         self.mat_P = tran_matrix
         self.beta = beta
         self.co_A = torch.Tensor(self.mat_P.size()[-1]).uniform_(-1, 1)
@@ -27,7 +27,7 @@ class RSDPF():
         self.sigma_v.requires_grad_(True)
         self.loss = nn.MSELoss()
         self.optim = torch.optim.SGD([self.co_A, self.co_B, self.co_C, self.co_D], lr = learning_rate, momentum=0.9)
-        self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[5*(1+x) for x in range(10)], gamma=0.7)
+        self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[5, 10, 15, 25], gamma=0.5)
 
     def filtering(self, model, m, s, o, N_p, dyn, prop, re): 
         batch, _, T = o.shape
@@ -122,7 +122,7 @@ class RSDPF():
         plt.xlabel('Epoch')
         plt.legend()
         plt.tight_layout()
-        plt.savefig(f'./figures/loss:{dyn}{prop}{re}.png')
+        plt.savefig(f'./figures/loss{dyn}{prop}{re}.png')
         plt.show()
         return l
 
@@ -159,7 +159,7 @@ class RSDPF():
 
 
 class RSPF: 
-    def __init__(self, tran_matrix, A, B, C, D, mu_u=0., sigma_u=0.1**(0.5), mu_v=0., sigma_v=0.1**(0.5), beta=1): 
+    def __init__(self, tran_matrix, A, B, C, D, mu_u=torch.tensor(0.), sigma_u=torch.tensor(0.1**(0.5)), mu_v=torch.tensor(0.), sigma_v=torch.tensor(0.1**(0.5)), beta=torch.tensor(1.)): 
         self.mat_P = tran_matrix
         self.co_A = A
         self.co_B = B
@@ -202,7 +202,7 @@ class RSPF:
         return m_t
         
     def state(self, m_t, s_p): 
-        return self.co_A[m_t].to(device) * s_p.to(device) + self.co_B[m_t].to(device) + torch.normal(mean=self.mu_u, std=1., size=s_p.size()).to(device) * self.sigma_u
+        return self.co_A[m_t].to(device) * s_p.to(device) + self.co_B[m_t].to(device) + torch.normal(mean=self.mu_u, std=1., size=s_p.size()).to(device) * self.sigma_u.to(device)
         
     def obs(self, m_t, s_t): 
         return self.co_C[m_t] * torch.sqrt(torch.abs(s_t)) + self.co_D[m_t] + torch.normal(mean=self.mu_v, std=self.sigma_v, size=s_t.size())

@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-# device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
 device = torch.device('cpu')
 
 P, A, B, C, D, beta = create_parameters(N_m=8)
@@ -15,7 +15,7 @@ T = 50
 N_p = 200
 run = 2000
 
-m, s, o = generate_data(T, rspf, batch=run, dyn="Poly")
+m, s, o = generate_data(T, rspf, batch=run, dyn="Mark")
 
 m_np = m.numpy().reshape(run, T)
 m_df = pd.DataFrame(m_np)
@@ -39,17 +39,17 @@ o_test.to_csv('./datasets/o_test')
 trainingset = LoadTrainSet()
 train_data = DataLoader(dataset=trainingset, batch_size=100, shuffle=True)
 validationset = LoadValSet()
-val_data = DataLoader(dataset=validationset, batch_size=100, shuffle=True)
+val_data = DataLoader(dataset=validationset, batch_size=500, shuffle=True)
 
 
 # # dyn=Mark/Poly, prop=Boot/Uni/Deter, re=sys/mul
 rsdpf = RSDPF(P, beta=beta)
-loss = rsdpf.training(train_data, val_data, N_p=N_p, dyn="Poly")
+loss = rsdpf.training(train_data, val_data, N_p=N_p, dyn="Mark")
 print(loss)
 
 testset = LoadTestSet()
 test_data = DataLoader(dataset=testset, batch_size=500)
-mse_dpf, mse_pf = rsdpf.testing(test_data, A, B, C, D, dyn="Poly")
+mse_dpf, mse_pf = rsdpf.testing(test_data, A, B, C, D, dyn="Mark")
 mse_dpf_df = pd.DataFrame(mse_dpf)
 mse_pf_df = pd.DataFrame(mse_pf)
 mse_dpf_df.to_csv('./results/mse_dpf')
