@@ -7,11 +7,11 @@ device = torch.device('cpu')
 
 class LoadTrainSet(Dataset): 
     def __init__(self): 
-        m_data = np.loadtxt('./datasets/m_train', delimiter=',', skiprows=1)
+        m_data = np.loadtxt('./datasets/m_train', delimiter=',', skiprows=1, dtype=np.float32)
         self.m = torch.from_numpy(m_data[:1000, np.newaxis, 1:])
-        s_data = np.loadtxt('./datasets/s_train', delimiter=',', skiprows=1)
+        s_data = np.loadtxt('./datasets/s_train', delimiter=',', skiprows=1, dtype=np.float32)
         self.s = torch.from_numpy(s_data[:1000, np.newaxis, 1:])
-        o_data = np.loadtxt('./datasets/o_train', delimiter=',', skiprows=1)
+        o_data = np.loadtxt('./datasets/o_train', delimiter=',', skiprows=1, dtype=np.float32)
         self.o = torch.from_numpy(o_data[:1000, np.newaxis, 1:])
         self.nums = self.m.shape[0]
         
@@ -23,11 +23,11 @@ class LoadTrainSet(Dataset):
 
 class LoadValSet(Dataset): 
     def __init__(self): 
-        m_data = np.loadtxt('./datasets/m_train', delimiter=',', skiprows=1)
+        m_data = np.loadtxt('./datasets/m_train', delimiter=',', skiprows=1, dtype=np.float32)
         self.m = torch.from_numpy(m_data[1000:, np.newaxis, 1:])
-        s_data = np.loadtxt('./datasets/s_train', delimiter=',', skiprows=1)
+        s_data = np.loadtxt('./datasets/s_train', delimiter=',', skiprows=1, dtype=np.float32)
         self.s = torch.from_numpy(s_data[1000:, np.newaxis, 1:])
-        o_data = np.loadtxt('./datasets/o_train', delimiter=',', skiprows=1)
+        o_data = np.loadtxt('./datasets/o_train', delimiter=',', skiprows=1, dtype=np.float32)
         self.o = torch.from_numpy(o_data[1000:, np.newaxis, 1:])
         self.nums = self.m.shape[0]
         
@@ -39,11 +39,11 @@ class LoadValSet(Dataset):
 
 class LoadTestSet(Dataset): 
     def __init__(self): 
-        m_data = np.loadtxt('./datasets/m_test', delimiter=',', skiprows=1)
+        m_data = np.loadtxt('./datasets/m_test', delimiter=',', skiprows=1, dtype=np.float32)
         self.m = torch.from_numpy(m_data[:, np.newaxis, 1:])
-        s_data = np.loadtxt('./datasets/s_test', delimiter=',', skiprows=1)
+        s_data = np.loadtxt('./datasets/s_test', delimiter=',', skiprows=1, dtype=np.float32)
         self.s = torch.from_numpy(s_data[:, np.newaxis, 1:])
-        o_data = np.loadtxt('./datasets/o_test', delimiter=',', skiprows=1)
+        o_data = np.loadtxt('./datasets/o_test', delimiter=',', skiprows=1, dtype=np.float32)
         self.o = torch.from_numpy(o_data[:, np.newaxis, 1:])
         self.nums = self.m.shape[0]
         
@@ -91,6 +91,7 @@ def generate_data(T, model, batch=1, dyn="Mark"):
 def weights_bootstrap(model, w_list, m_list, s_list, o): 
     lw = torch.log(w_list).to(device)
     o = torch.ones(s_list.size()).to(device) * o.to(device)
+
     s_obs = s_list.clone().detach()
     o -= (model.co_C[m_list].to(device) * torch.sqrt(torch.abs(s_obs)).to(device) + model.co_D[m_list].to(device))
     lw += torch.distributions.normal.Normal(loc=0., scale=model.sigma_v.to(device)).log_prob(o)
@@ -99,6 +100,26 @@ def weights_bootstrap(model, w_list, m_list, s_list, o):
 # #         w += 10**(-300)
     w = torch.exp(lw - lw.max(dim=1, keepdim=True)[0])
     return w/w.sum(dim=1, keepdim=True)
+
+def dyn_density(model, m, s_t, s_p, logdetJ=torch.Tensor([0])): 
+    s_t -= (model.co_A[m].to(device) * s_p + model.co_C[m])
+    log_den = torch.distributions.Normal(loc=0., scale=model.sigma_u.to(device)).log_prob(s_t)
+    if logdetJ.sum().item(): 
+        log_den -= logdetJ
+    return log_den
+
+def obs_density(z, logdetJ): 
+    z_prob = torch.distributions.Normal(loc=0., scale=0.1).log_prob(z)
+    log_den = z + logdetJ
+
+    return log_den
+
+def weights_CNFs(w, logden_dyn, logden_prop, logden_obs): 
+    lw = torch.log(w).to(device) 
+    lw += (logden_dyn + logden_obs - logden_prop)
+    w = torch.exp(lw - lw.max(dim=1, keepdim=True)[0])
+    return w/w.sum(dim=1, keepdim=True)
+
 
 def weights_proposal(model, w_list, m_list, s_list, o, dyn): 
     lw = torch.log(w_list)
