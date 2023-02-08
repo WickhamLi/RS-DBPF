@@ -138,9 +138,9 @@ class Cond_PlanarTrans(nn.Module):
         batch_index = tuple(i//m.shape[1] for i in range(m.shape[0] * m.shape[1]))
         pars_index = tuple(torch.arange(m.shape[1]).tile(m.shape[0]))
         index = tuple(m.view(-1))
-        w = w_tile[batch_index, pars_index, index]
-        u = u_tile[batch_index, pars_index, index]
-        b = b_tile[batch_index, pars_index, index]
+        w = w_tile[batch_index, pars_index, index].view(m.shape)
+        u = u_tile[batch_index, pars_index, index].view(m.shape)
+        b = b_tile[batch_index, pars_index, index].view(m.shape)
 
         if ((u * w).sum(dim=-1, keepdim=True) < -1).sum(): 
             # self.modified_u(m)

@@ -90,11 +90,11 @@ def generate_data(T, model, batch=1, dyn="Mark"):
 
 def weights_bootstrap(model, w_list, m_list, s_list, o): 
     lw = torch.log(w_list).to(device)
-    o = torch.ones(s_list.size()).to(device) * o.to(device)
+    o = torch.ones(s_list.size()).to(device) * o
 
     s_obs = s_list.clone().detach()
-    o -= (model.co_C[m_list].to(device) * torch.sqrt(torch.abs(s_obs)).to(device) + model.co_D[m_list].to(device))
-    lw += torch.distributions.normal.Normal(loc=0., scale=model.sigma_v.to(device)).log_prob(o)
+    o -= (model.co_C[m_list] * torch.sqrt(torch.abs(s_obs)) + model.co_D[m_list])
+    lw += torch.distributions.normal.Normal(loc=0., scale=model.sigma_v).log_prob(o)
 #     for i in range(len(s_list)): 
 #         lw[i] += stats.norm(loc=model.co_C[m_list[i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[i]], scale=np.sqrt(0.1)).logpdf(o)
 # #         w += 10**(-300)
@@ -102,15 +102,15 @@ def weights_bootstrap(model, w_list, m_list, s_list, o):
     return w/w.sum(dim=1, keepdim=True)
 
 def dyn_density(model, m, s_t, s_p, logdetJ=torch.Tensor([0])): 
-    s_t -= (model.co_A[m].to(device) * s_p + model.co_C[m])
-    log_den = torch.distributions.Normal(loc=0., scale=model.sigma_u.to(device)).log_prob(s_t)
+    s_t -= (model.co_A[m] * s_p + model.co_C[m])
+    log_den = torch.distributions.Normal(loc=0., scale=model.sigma_u).log_prob(s_t)
     if logdetJ.sum().item(): 
         log_den -= logdetJ
     return log_den
 
 def obs_density(z, logdetJ): 
-    z_prob = torch.distributions.Normal(loc=0., scale=0.1).log_prob(z)
-    log_den = z + logdetJ
+    log_z = torch.distributions.Normal(loc=0., scale=1.).log_prob(z)
+    log_den = log_z + logdetJ
 
     return log_den
 
@@ -151,9 +151,9 @@ def weights_proposal(model, w_list, m_list, s_list, o, dyn):
 
 def inv_cdf(cum, ws): 
     index = torch.ones(ws.size(), dtype=int).to(device) * cum.size()[-1]
-    w_cum = ws.cumsum(axis=1).clone().detach().to(device)
+    w_cum = ws.cumsum(axis=1).clone().detach()
     for i in range(cum.size()[-1]): 
-        index[:, [i]] -= (cum[:, [i]].to(device) < w_cum).sum(dim=1, keepdim=True)
+        index[:, [i]] -= (cum[:, [i]] < w_cum).sum(dim=1, keepdim=True)
         # while cum[i] > w: 
         #     k += 1
         #     w += ws[k]
@@ -170,7 +170,7 @@ def resample_systematic(ws):
     
 def resample_multinomial(ws): 
     batch, N_p = ws.size()
-    uni = (-torch.log(torch.rand(batch, N_p+1, dtype=torch.double))).cumsum(dim=1)
+    uni = (-torch.log(torch.rand(batch, N_p+1, dtype=torch.double).to(device))).cumsum(dim=1)
     cum = uni[:, :-1] / uni[:, [-1]]
 
     return inv_cdf(cum, ws)

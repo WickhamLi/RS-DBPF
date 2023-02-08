@@ -29,15 +29,15 @@ class RSDPF(nn.Module):
         self.sigma_v = nn.Parameter(torch.Tensor(1).uniform_(0.1, 0.5))
         # self.sigma_v.requires_grad_(True)
         # self.dynamic = PlanarFlows(dim=1, N_m=8, layer=2)
-        self.proposal = Cond_PlanarFlows(dim=1, N_m=8, layer=2)
-        self.measure = Cond_PlanarFlows(dim=1, N_m=8, layer=2)
+        self.proposal = Cond_PlanarFlows(dim=1, N_m=8, layer=2).to(device)
+        self.measure = Cond_PlanarFlows(dim=1, N_m=8, layer=2).to(device)
         self.loss = nn.MSELoss()
         self.optim = torch.optim.SGD([self.co_A, self.co_B, self.co_C, self.co_D], lr = learning_rate, momentum=0.9)
         self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[5, 10, 15, 25], gamma=0.5)
 
     def filtering(self, model, m, s, o, N_p, dyn, prop, re, dpf): 
         batch, _, T = o.shape
-        m_list = torch.zeros(batch, N_p, T, dtype=int)
+        m_list = torch.zeros(batch, N_p, T, dtype=int).to(device)
         s_list = torch.zeros(batch, N_p, T).to(device)
         w_list = torch.zeros(batch, N_p, T).to(device)
         m_list[:, :, 0], s_list[:, :, 0] = model.initial(size=(batch, N_p))
@@ -63,7 +63,7 @@ class RSDPF(nn.Module):
             s_list_dyn[:, :, [t]] = model.state(m_list[:, :, [t]], s_list_re[:, :, [t-1]])
             # s_list_dyn[:, :, [t]], logdetJ_dyn = self.dynamic(m_list[:, :, [t]], s_list_proto[:, :, [t]])
             s_list[:, :, [t]], logdetJ_prop = self.proposal(m=m_list[:, :, [t]], s=s_list_dyn[:, :, [t]], o=o[:, :, [t]])
-            z_list[:, :, [t]], logdetJ_obs = self.measure(m=m_list[:, :, [t]], s=o[:, :, [t]], o=s_list_dyn[:, :, [t]])
+            z_list[:, :, [t]], logdetJ_obs = self.measure(m=m_list[:, :, [t]], s=o[:, :, [t]], o=s_list[:, :, [t]])
             
             if dpf: 
                 logden_dyn = dyn_density(model, m_list[:, :, [t]], s_list_dyn[:, :, [t]], s_list_re[:, :, [t-1]])
@@ -118,7 +118,7 @@ def training(model, train_data, val_data, N_iter=40, N_p=2000, dyn="Mark", prop=
     l = np.ones(N_iter) * 1e2
     for epoch in range(N_iter): 
         for i, (m_data, s_data, o_data) in enumerate(train_data): 
-            s_est = model(m_data[:, :, [0]], s_data[:, :, [0]], o_data, N_p, dyn, prop, re)
+            s_est = model(m_data[:, :, [0]], s_data[:, :, [0]], o_data.to(device), N_p, dyn, prop, re)
             loss_sample = ((s_est - s_data.to(device))**2).mean(dim=2, keepdim=True)
             loss = loss_sample.mean(dim=0, keepdim=True)
             # loss.requires_grad_(True)
@@ -198,9 +198,9 @@ class RSPF:
     def Markov_dynamic(self, m_p): 
         batch, N_p = m_p.size()
         N_m = self.mat_P.size()[-1]
-        sample = torch.rand(batch, N_p, 1)
-        m_t = torch.ones(batch, N_p, 1, dtype=int) * N_m
-        cum = self.mat_P[m_p, :].cumsum(axis=2)
+        sample = torch.rand(batch, N_p, 1).to(device)
+        m_t = torch.ones(batch, N_p, 1, dtype=int).to(device) * N_m
+        cum = self.mat_P[m_p, :].cumsum(axis=2).to(device)
         m_t -= (sample < cum).sum(dim=2, keepdim=True)
         return m_t.view(batch, N_p)
     

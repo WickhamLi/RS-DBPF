@@ -43,7 +43,7 @@ val_data = DataLoader(dataset=validationset, batch_size=500, shuffle=True)
 
 
 # # dyn=Mark/Poly, prop=Boot/Uni/Deter, re=sys/mul
-rsdpf = RSDPF(P, beta=beta)
+rsdpf = RSDPF(P, beta=beta).to(device)
 loss = training(rsdpf, train_data, val_data, N_p=N_p, dyn="Mark")
 print(loss)
 
