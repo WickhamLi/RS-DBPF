@@ -20,14 +20,14 @@ class RSDPF(nn.Module):
             self.co_C = nn.Parameter(self.co_A.data.clone().detach())
             self.co_D = nn.Parameter(self.co_B.data.clone().detach())
         else: 
-            self.co_A = nn.Parameter(torch.Tensor(1).uniform_(-1, 1).tile(self.mat_P.size()[-1]))
-            self.co_B = nn.Parameter(torch.Tensor(1).uniform_(-4, 4).tile(self.mat_P.size()[-1]))
+            self.co_A = nn.Parameter(torch.Tensor(1).uniform_(-1, 1))
+            self.co_B = nn.Parameter(torch.Tensor(1).uniform_(-4, 4))
             self.co_C = nn.Parameter(self.co_A.data.clone().detach())
             self.co_D = nn.Parameter(self.co_B.data.clone().detach())
         self.sigma_u = nn.Parameter(torch.Tensor(1).uniform_(0.1, 0.5))
         self.sigma_v = nn.Parameter(torch.Tensor(1).uniform_(0.1, 0.5))
-        self.proposal = Cond_PlanarFlows(dim=1, N_m=8, layer=2).to(device)
-        self.measure = Cond_PlanarFlows(dim=1, N_m=8, layer=2).to(device)
+        # self.proposal = Cond_PlanarFlows(dim=1, N_m=8, layer=2).to(device)
+        # self.measure = Cond_PlanarFlows(dim=1, N_m=8, layer=2).to(device)
         self.loss = nn.MSELoss()
         self.optim = torch.optim.SGD([self.co_A, self.co_B, self.co_C, self.co_D], lr = learning_rate, momentum=0.9)
         self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[5, 10, 15, 25], gamma=0.5)
@@ -37,34 +37,37 @@ class RSDPF(nn.Module):
         m_list = torch.zeros(batch, N_p, T, dtype=int).to(device)
         s_list = torch.zeros(batch, N_p, T).to(device)
         w_list = torch.zeros(batch, N_p, T).to(device)
-        m_list[:, :, 0], s_list[:, :, 0] = model.initial(size=(batch, N_p))
+        if model.co_A.dim() == 1: 
+            _, s_list[:, :, 0] = model.initial(size=(batch, N_p))
+        else: 
+            m_list[:, :, 0], s_list[:, :, 0] = model.initial(size=(batch, N_p))
         # m_list[:, :, [0]] = m
         # s_list[:, :, [0]] = s
         m_list_re = m_list.clone().detach()
         s_list_re = s_list.clone().detach()
-        # s_list_proto = s_list.clone().detach()
-        s_list_dyn = s_list.clone().detach()
-        z_list = s_list.clone().detach()
+        if nf: 
+            s_list_prop = s_list.clone().detach()
+            z_list = s_list.clone().detach()
         w_list[:, :, 0] = 1/N_p
         w_list_re = w_list.clone().detach()
         for t in range(1, T): 
-            if prop=="Boot": 
-                if dyn=="Poly": 
-                    m_list[:, :, t] = model.Polyaurn_dynamic(m_list_re[:, :, :t])
-                elif dyn=="Mark": 
-                    m_list[:, :, t] = model.Markov_dynamic(m_list_re[:, :, t-1])
-            elif prop=="Uni": 
-                m_list[:, :, t] = model.propuni_dynamic(size=(batch, N_p))
-            elif prop=='Deter': 
-                m_list[:, :, t] = torch.arange(len(model.co_A)).tile(batch, int(N_p/len(model.co_A)))
-            s_list_dyn[:, :, [t]] = model.state(m_list[:, :, [t]], s_list_re[:, :, [t-1]])
-            # s_list_dyn[:, :, [t]], logdetJ_dyn = self.dynamic(m_list[:, :, [t]], s_list_proto[:, :, [t]])
-            s_list[:, :, [t]], logdetJ_prop = self.proposal(m=m_list[:, :, [t]], s=s_list_dyn[:, :, [t]], o=o[:, :, [t]])
-            z_list[:, :, [t]], logdetJ_obs = self.measure(m=m_list[:, :, [t]], s=o[:, :, [t]], o=s_list[:, :, [t]])
+            if model.co_A.dim() == 8: 
+                if prop=="Boot": 
+                    if dyn=="Poly": 
+                        m_list[:, :, t] = model.Polyaurn_dynamic(m_list_re[:, :, :t])
+                    elif dyn=="Mark": 
+                        m_list[:, :, t] = model.Markov_dynamic(m_list_re[:, :, t-1])
+                elif prop=="Uni": 
+                    m_list[:, :, t] = model.propuni_dynamic(size=(batch, N_p))
+                elif prop=='Deter': 
+                    m_list[:, :, t] = torch.arange(len(model.co_A)).tile(batch, int(N_p/len(model.co_A)))
+            s_list[:, :, [t]] = model.state(m_list[:, :, [t]], s_list_re[:, :, [t-1]])         
             
             if nf: 
-                logden_dyn = dyn_density(model, m_list[:, :, [t]], s_list_dyn[:, :, [t]], s_list_re[:, :, [t-1]])
-                logden_prop = dyn_density(model, m_list[:, :, [t]], s_list[:, :, [t]], s_list_re[:, :, [t-1]], logdetJ_prop)
+                s_list_prop[:, :, [t]], logdetJ_prop = self.proposal(m=m_list[:, :, [t]], s=s_list[:, :, [t]], o=o[:, :, [t]])
+                z_list[:, :, [t]], logdetJ_obs = self.measure(m=m_list[:, :, [t]], s=o[:, :, [t]], o=s_list[:, :, [t]])
+                logden_dyn = dyn_density(model, m_list[:, :, [t]], s_list[:, :, [t]], s_list_re[:, :, [t-1]])
+                logden_prop = dyn_density(model, m_list[:, :, [t]], s_list_prop[:, :, [t]], s_list_re[:, :, [t-1]], logdetJ_prop)
                 logden_obs = obs_density(z_list[:, :, [t]], logdetJ_obs)
 
                 if prop=="Boot": 
@@ -95,8 +98,9 @@ class RSDPF(nn.Module):
                 
                 batch_index = tuple(i//N_p for i in range(batch * N_p))
                 index_flatten = tuple(index.view(-1))
-                m_trans = m_list[batch_index, index_flatten, [t]].clone().detach()
-                m_list_re[:, :, t] = m_trans.view(batch, -1)
+                if model.co_A.dim() == 8: 
+                    m_trans = m_list[batch_index, index_flatten, [t]].clone().detach()
+                    m_list_re[:, :, t] = m_trans.view(batch, -1)
                 s_trans = s_list[batch_index, index_flatten, [t]].clone().detach()
                 s_list_re[:, :, t] = s_trans.view(batch, -1)
 
@@ -110,7 +114,7 @@ class RSDPF(nn.Module):
         return s_est
 
 
-def training(model, train_data, val_data, N_iter=50, N_p=2000, dyn="Mark", prop="Boot", re="mul", nf=0): 
+def training(model, train_data, val_data, N_iter=40, N_p=2000, dyn="Mark", prop="Boot", re="mul", nf=False): 
     N_step = len(train_data)
     l = np.ones(N_iter) * 1e2
     for epoch in range(N_iter): 
@@ -144,7 +148,7 @@ def training(model, train_data, val_data, N_iter=50, N_p=2000, dyn="Mark", prop=
     plt.show()
     return l
 
-def testing(model, test_data, A, B, C, D, N_p=2000, dyn="Mark", prop="Boot", re="mul", nf=0): 
+def testing(model, test_data, A, B, C, D, N_p=2000, dyn="Mark", prop="Boot", re="mul", nf=False): 
     rsdpf = torch.load('./results/best_val')
     rspf = RSPF(model.mat_P, A, B, C, D, beta=model.beta)
     with torch.no_grad(): 
