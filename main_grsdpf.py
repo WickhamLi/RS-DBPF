@@ -1,5 +1,5 @@
 import torch
-from rspf_torch import *
+from rspf_dpf import *
 from utils import *
 from torch.utils.data import DataLoader
 import pandas as pd
@@ -43,13 +43,13 @@ val_data = DataLoader(dataset=validationset, batch_size=500, shuffle=True)
 
 
 # # dyn=Mark/Poly, prop=Boot/Uni/Deter, re=sys/mul
-rsdpf = RSDPF(P, beta=beta).to(device)
-loss = training(rsdpf, train_data, val_data, N_p=N_p, dyn="Mark")
+rsdpf = RSDPF(P, beta=beta, rs=False).to(device)
+loss = training(rsdpf, train_data, val_data, N_p=N_p, dyn="Mark", nf=False)
 print(loss)
 
 testset = LoadTestSet()
 test_data = DataLoader(dataset=testset, batch_size=500)
-mse_dpf, mse_pf = testing(rsdpf, test_data, A, B, C, D, dyn="Mark")
+mse_dpf, mse_pf = testing(rsdpf, test_data, A, B, C, D, dyn="Mark", nf=False)
 mse_dpf_df = pd.DataFrame(mse_dpf)
 mse_pf_df = pd.DataFrame(mse_pf)
 mse_dpf_df.to_csv('./results/mse_dpf')
