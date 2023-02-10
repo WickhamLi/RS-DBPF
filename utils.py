@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+from matplotlib import pyplot as plt
 from torch.utils.data import Dataset
 
 # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
@@ -7,11 +8,11 @@ device = torch.device('cpu')
 
 class LoadTrainSet(Dataset): 
     def __init__(self): 
-        m_data = np.loadtxt('./datasets/m_train', delimiter=',', skiprows=1, dtype=np.float32)
+        m_data = np.loadtxt(f'./datasets/{dir}/m_train', delimiter=',', skiprows=1, dtype=np.float32)
         self.m = torch.from_numpy(m_data[:1000, np.newaxis, 1:])
-        s_data = np.loadtxt('./datasets/s_train', delimiter=',', skiprows=1, dtype=np.float32)
+        s_data = np.loadtxt(f'./datasets/{dir}/s_train', delimiter=',', skiprows=1, dtype=np.float32)
         self.s = torch.from_numpy(s_data[:1000, np.newaxis, 1:])
-        o_data = np.loadtxt('./datasets/o_train', delimiter=',', skiprows=1, dtype=np.float32)
+        o_data = np.loadtxt(f'./datasets/{dir}/o_train', delimiter=',', skiprows=1, dtype=np.float32)
         self.o = torch.from_numpy(o_data[:1000, np.newaxis, 1:])
         self.nums = self.m.shape[0]
         
@@ -22,12 +23,12 @@ class LoadTrainSet(Dataset):
         return self.nums
 
 class LoadValSet(Dataset): 
-    def __init__(self): 
-        m_data = np.loadtxt('./datasets/m_train', delimiter=',', skiprows=1, dtype=np.float32)
+    def __init__(self, dir): 
+        m_data = np.loadtxt(f'./datasets/{dir}/m_train', delimiter=',', skiprows=1, dtype=np.float32)
         self.m = torch.from_numpy(m_data[1000:, np.newaxis, 1:])
-        s_data = np.loadtxt('./datasets/s_train', delimiter=',', skiprows=1, dtype=np.float32)
+        s_data = np.loadtxt(f'./datasets/{dir}/s_train', delimiter=',', skiprows=1, dtype=np.float32)
         self.s = torch.from_numpy(s_data[1000:, np.newaxis, 1:])
-        o_data = np.loadtxt('./datasets/o_train', delimiter=',', skiprows=1, dtype=np.float32)
+        o_data = np.loadtxt(f'./datasets/{dir}/o_train', delimiter=',', skiprows=1, dtype=np.float32)
         self.o = torch.from_numpy(o_data[1000:, np.newaxis, 1:])
         self.nums = self.m.shape[0]
         
@@ -38,12 +39,12 @@ class LoadValSet(Dataset):
         return self.nums
 
 class LoadTestSet(Dataset): 
-    def __init__(self): 
-        m_data = np.loadtxt('./datasets/m_test', delimiter=',', skiprows=1, dtype=np.float32)
+    def __init__(self, dir): 
+        m_data = np.loadtxt(f'./datasets/{dir}/m_test', delimiter=',', skiprows=1, dtype=np.float32)
         self.m = torch.from_numpy(m_data[:, np.newaxis, 1:])
-        s_data = np.loadtxt('./datasets/s_test', delimiter=',', skiprows=1, dtype=np.float32)
+        s_data = np.loadtxt(f'./datasets/{dir}/s_test', delimiter=',', skiprows=1, dtype=np.float32)
         self.s = torch.from_numpy(s_data[:, np.newaxis, 1:])
-        o_data = np.loadtxt('./datasets/o_test', delimiter=',', skiprows=1, dtype=np.float32)
+        o_data = np.loadtxt(f'./datasets/{dir}/o_test', delimiter=',', skiprows=1, dtype=np.float32)
         self.o = torch.from_numpy(o_data[:, np.newaxis, 1:])
         self.nums = self.m.shape[0]
         
@@ -53,44 +54,9 @@ class LoadTestSet(Dataset):
     def __len__(self): 
         return self.nums
 
-def create_parameters(N_m=8): 
-    P = torch.zeros(N_m, N_m)
-    for i in range(N_m): 
-        if not i: 
-            P += torch.diag(torch.Tensor([0.80]*N_m), i)
-        elif i==1: 
-            P += torch.diag(torch.Tensor([0.15]*(8-i)), i)
-            P += torch.diag(torch.Tensor([0.15]*i), i-8)
-        else: 
-            P += torch.diag(torch.Tensor([1/120]*(8-i)), i)
-            P += torch.diag(torch.Tensor([1/120]*i), i-8)
-
-    A = torch.Tensor([-0.1, -0.3, -0.5, -0.9, 0.1, 0.3, 0.5, 0.9])
-    B = torch.Tensor([0., -2., 2., -4., 0., 2., -2., 4.])
-    C = A.clone()
-    D = B.clone()
-    beta = torch.Tensor([1]*N_m)
-    return P, A, B, C, D, beta
-
-def generate_data(T, model, batch=1, dyn="Mark"): 
-    m = torch.zeros(batch, 1, T, dtype=int)
-    s = torch.zeros(batch, 1, T)
-    o = torch.zeros(batch, 1, T)
-    m[:, :, 0], s[:, :, 0] = model.initial(size=(batch, 1))
-    o[:, :, 0] = model.obs(m[:, :, 0], s[:, :, 0])
-    for t in range(1, T):
-        if dyn=="Poly": 
-            m[:, :, t] = model.Polyaurn_dynamic(m[:, :, :t])
-        else: 
-            m[:, :, t] = model.Markov_dynamic(m[:, :, t-1])
-        s[:, :, t] = model.state(m[:, :, t], s[:, :, t-1])
-        o[:, :, t] = model.obs(m[:, :, t], s[:, :, t])
-
-    return m, s, o
-
 def weights_bootstrap(model, w_list, m_list, s_list, o): 
-    lw = torch.log(w_list).to(device)
-    o = torch.ones(s_list.size()).to(device) * o
+    lw = torch.log(w_list)
+    o = torch.ones(s_list.size()) * o
 
     s_obs = s_list.clone().detach()
     o -= (model.co_C[m_list] * torch.sqrt(torch.abs(s_obs)) + model.co_D[m_list])
@@ -115,7 +81,7 @@ def obs_density(z, logdetJ):
     return log_den
 
 def weights_CNFs(w, logden_dyn, logden_prop, logden_obs): 
-    lw = torch.log(w).to(device) 
+    lw = torch.log(w)
     lw += (logden_dyn + logden_obs - logden_prop)
     w = torch.exp(lw - lw.max(dim=1, keepdim=True)[0])
     return w/w.sum(dim=1, keepdim=True)
@@ -150,7 +116,7 @@ def weights_proposal(model, w_list, m_list, s_list, o, dyn):
 
 
 def inv_cdf(cum, ws): 
-    index = torch.ones(ws.size(), dtype=int).to(device) * cum.size()[-1]
+    index = torch.ones(ws.size(), dtype=int) * cum.size()[-1]
     w_cum = ws.cumsum(axis=1).clone().detach()
     for i in range(cum.size()[-1]): 
         index[:, [i]] -= (cum[:, [i]] < w_cum).sum(dim=1, keepdim=True)
@@ -170,7 +136,8 @@ def resample_systematic(ws):
     
 def resample_multinomial(ws): 
     batch, N_p = ws.size()
-    uni = (-torch.log(torch.rand(batch, N_p+1, dtype=torch.double).to(device))).cumsum(dim=1)
+    uni = (-torch.log(torch.rand(batch, N_p+1, dtype=torch.double))).cumsum(dim=1)
     cum = uni[:, :-1] / uni[:, [-1]]
 
     return inv_cdf(cum, ws)
+
