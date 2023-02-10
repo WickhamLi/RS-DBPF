@@ -1,8 +1,9 @@
 from sklearn.model_selection import train_test_split
 from rspf_dpf import *
 
-device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')  
-# device = torch.device('cpu')
+# device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')  
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cpu')
 
 def create_parameters(N_m=8): 
     P = torch.zeros(N_m, N_m, device=device)

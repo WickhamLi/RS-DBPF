@@ -3,6 +3,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from torch.utils.data import Dataset
 
+# device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu') 
 # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
 device = torch.device('cpu')
 
@@ -56,10 +57,9 @@ class LoadTestSet(Dataset):
 
 def weights_bootstrap(model, w_list, m_list, s_list, o): 
     lw = torch.log(w_list)
-    o = torch.ones(s_list.size()) * o
-
-    s_obs = s_list.clone().detach()
-    o -= (model.co_C[m_list] * torch.sqrt(torch.abs(s_obs)) + model.co_D[m_list])
+    o = o.tile(1, s_list.shape[1], 1)
+    torch.where(s_list==0., 1e-4, s_list)
+    o -= (model.co_C[m_list] * torch.sqrt(torch.abs(s_list)) + model.co_D[m_list])
     lw += torch.distributions.normal.Normal(loc=0., scale=model.sigma_v).log_prob(o)
 #     for i in range(len(s_list)): 
 #         lw[i] += stats.norm(loc=model.co_C[m_list[i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[i]], scale=np.sqrt(0.1)).logpdf(o)
@@ -116,7 +116,7 @@ def weights_proposal(model, w_list, m_list, s_list, o, dyn):
 
 
 def inv_cdf(cum, ws): 
-    index = torch.ones(ws.size(), dtype=int) * cum.size()[-1]
+    index = torch.ones(ws.size(), dtype=int, device=device) * cum.size()[-1]
     w_cum = ws.cumsum(axis=1).clone().detach()
     for i in range(cum.size()[-1]): 
         index[:, [i]] -= (cum[:, [i]] < w_cum).sum(dim=1, keepdim=True)
@@ -136,7 +136,7 @@ def resample_systematic(ws):
     
 def resample_multinomial(ws): 
     batch, N_p = ws.size()
-    uni = (-torch.log(torch.rand(batch, N_p+1, dtype=torch.double))).cumsum(dim=1)
+    uni = (-torch.log(torch.rand(batch, N_p+1, device=device))).cumsum(dim=1)
     cum = uni[:, :-1] / uni[:, [-1]]
 
     return inv_cdf(cum, ws)

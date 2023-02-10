@@ -5,8 +5,9 @@ from rspf_dpf import *
 from utils import *
 import datetime
 
-device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu') 
-# device = torch.device('cpu')
+# device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu') 
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
+device = torch.device('cpu')
 
 start_time = datetime.datetime.now()
 

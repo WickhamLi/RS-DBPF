@@ -5,8 +5,9 @@ import pandas as pd
 from utils import *
 from NFs import *
 
-device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')  
-# device = torch.device('cpu')
+# device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')  
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
+device = torch.device('cpu')
 
 class RSPF: 
     def __init__(self, A, B, C, D, mu_u=torch.tensor(0.), sigma_u=torch.tensor(0.1**(0.5)), mu_v=torch.tensor(0.), sigma_v=torch.tensor(0.1**(0.5)), tran_matrix=False, beta=False): 
@@ -22,7 +23,7 @@ class RSPF:
         self.beta = beta
 
     def initial(self, size=(1, 1)): 
-        return torch.multinomial(torch.ones(size[0], len(self.co_A)), replacement=True, num_samples=size[1]).to(device), torch.Tensor(size=size).uniform_(-0.5, 0.5).to(device)
+        return torch.multinomial(torch.ones(size[0], len(self.co_A), device=device), replacement=True, num_samples=size[1]), torch.Tensor(size=size).uniform_(-0.5, 0.5).to(device)
 
     def Markov_dynamic(self, m_p): 
         batch, N_p = m_p.size()
@@ -36,8 +37,8 @@ class RSPF:
     def Polyaurn_dynamic(self, m_p):
         batch, N_p = m_p.size()[:2]
         N_m = len(self.beta)
-        sample = torch.rand(batch, N_p, 1)
-        m_t = torch.ones(batch, N_p, 1, dtype=int) * N_m
+        sample = torch.rand(batch, N_p, 1, device=device)
+        m_t = torch.ones(batch, N_p, 1, dtype=int, device=device) * N_m
         alpha = torch.zeros(batch, N_p, N_m, device=device)
         for m_index in range(N_m): 
             alpha[:, :, m_index] = (m_p == m_index).sum(dim=2)
@@ -51,16 +52,16 @@ class RSPF:
         return m_t
         
     def state(self, m_t, s_p): 
-        return self.co_A[m_t] * s_p + self.co_B[m_t] + torch.normal(mean=self.mu_u, std=1., size=s_p.size()) * self.sigma_u
+        return self.co_A[m_t] * s_p + self.co_B[m_t] + torch.randn(s_p.size(), device=device) * self.sigma_u + self.mu_u
         
     def obs(self, m_t, s_t): 
         return self.co_C[m_t] * torch.sqrt(torch.abs(s_t)) + self.co_D[m_t] + torch.normal(mean=self.mu_v, std=self.sigma_v, size=s_t.size())
 
     def filtering(self, m, s, o, N_p, dyn, prop, re): 
         batch, _, T = o.shape
-        m_list = torch.zeros(batch, N_p, T, dtype=int)
-        s_list = torch.zeros(batch, N_p, T)
-        w_list = torch.zeros(batch, N_p, T)
+        m_list = torch.zeros(batch, N_p, T, dtype=int, device=device)
+        s_list = torch.zeros(batch, N_p, T, device=device)
+        w_list = torch.zeros(batch, N_p, T, device=device)
         m_list[:, :, 0], s_list[:, :, 0] = self.initial(size=(batch, N_p))
         # m_list[:, :, [0]] = m
         # s_list[:, :, [0]] = s
@@ -88,7 +89,7 @@ class RSPF:
             
             ESS = 1 / (w_list[:, :, t]**2).sum(dim=1) < s_list.size()[1]
             if ESS.sum(): 
-                index = torch.arange(N_p).tile(batch, 1)
+                index = torch.arange(N_p, device=device).tile(batch, 1)
                 if re=="sys": 
                     re_index = torch.where(ESS)[0]
                     index[re_index, :] = resample_systematic(w_list[re_index, :, t])
@@ -108,9 +109,9 @@ class RSPF:
 
     def testing(self, test_data, N_p=2000, dyn="Mark", prop="Boot", re="mul"): 
         for m_test, s_test, o_test in test_data: 
-            m_parlist, s_parlist, w_parlist = self.filtering(m_test[:, :, [0]], s_test[:, :, [0]], o_test, N_p=N_p, dyn=dyn, prop=prop, re=re)
+            m_parlist, s_parlist, w_parlist = self.filtering(m_test[:, :, [0]], s_test[:, :, [0]], o_test.to(device), N_p=N_p, dyn=dyn, prop=prop, re=re)
             s_est = (w_parlist * s_parlist).sum(dim=1, keepdim=True)
-            mse_pf = ((s_est - s_test)**2).detach().numpy()
+            mse_pf = ((s_est - s_test.to(device))**2).detach().numpy()
             mse_pfdf = pd.DataFrame(np.squeeze(mse_pf))
             mse_pfdf.to_csv(f'./results/rspf/mse_{dyn}_{prop}_{re}')
 
@@ -267,8 +268,54 @@ class MMPF(RSPF):
         self.mu_v = mu_v
         self.sigma_v = sigma_v
 
+    def model_trans(self, m_p, gamma=1.): 
+        m_p**gamma / (m_p**gamma).sum(dim=1, keepdim=True)
 
+    def filtering(self, m, s, o, N_p, dyn, prop, re): 
+        batch, _, T = o.shape       
+        m_list = torch.tensor(i//(N_p/len(self.co_A)) for i in range(N_p)).view(1, -1, 1)
+        s_list = torch.zeros(batch, N_p, T, device=device)
+        w_list = torch.zeros(batch, N_p, T, device=device)   
+        pi_list = torch.zeros(batch, len(self.co_A), T, device=device)     
+        _, s_list[:, :, 0] = self.initial(size=(batch, N_p))
+        # m_list[:, :, [0]] = m
+        # s_list[:, :, [0]] = s
+        w_list[:, :, 0] = 1/N_p
+        pi_list[:, :, 0] = 1/len(self.co_A)
+        for t in range(1, T): 
+            s_list[:, :, [t]] = self.state(m_list, s_list[:, :, [t-1]])  
 
+            # m_list[:, :, t] = self.Polyaurn_dynamic(m_list[:, :, :t])
+            # m_list[:, :, t] = self.Markov_dynamic(m_list[:, :, t-1])
+            # m_list[:, :, t] = self.propuni_dynamic(size=(batch, N_p))
+            # m_list[:, :, t] = torch.arange(len(self.co_A)).tile(batch, int(N_p/len(self.co_A)))
+            
+            if prop=="Boot": 
+                w_list[:, :, [t]] = weights_bootstrap(self, w_list[:, :, [t-1]], m_list[:, :, [t]], s_list[:, :, [t]], o[:, :, [t]])
+            else:
+                if dyn=="Mark": 
+                    w_list[:, :, t] = weights_proposal(self, w_list[:, :, t-1], m_list[:, :, t-1:t+1], s_list[:, :, t], o[:, [t]], dyn)
+                elif dyn=="Poly": 
+                    w_list[:, :, t] = weights_proposal(self, w_list[:, :, t-1], m_list[:, :, :t+1], s_list[:, :, t], o[:, [t]], dyn)
+            
+            ESS = 1 / (w_list[:, :, t]**2).sum(dim=1) < s_list.size()[1]
+            if ESS.sum(): 
+                index = torch.arange(N_p, device=device).tile(batch, 1)
+                if re=="sys": 
+                    re_index = torch.where(ESS)[0]
+                    index[re_index, :] = resample_systematic(w_list[re_index, :, t])
+                else: 
+                    re_index = torch.where(ESS)[0]
+                    index[re_index, :] = resample_multinomial(w_list[re_index, :, t])
+                w_list[re_index, :, t] = 1 / N_p
+                
+                batch_index = tuple(i//N_p for i in range(batch * N_p))
+                index_flatten = tuple(index.view(-1))
+                m_trans = m_list[batch_index, index_flatten, [t]].clone().detach()
+                m_list[:, :, t] = m_trans.view(batch, -1)
+                s_trans = s_list[batch_index, index_flatten, [t]].clone().detach()
+                s_list[:, :, t] = s_trans.view(batch, -1)
 
+        return m_list, s_list, w_list
 
 
