@@ -102,10 +102,10 @@ class RSPF:
                 
                 batch_index = torch.arange(batch, dtype=torch.long).tile(N_p, 1).T.reshape(-1)
                 index_flatten = index.view(-1)
-                m_trans = m_list[batch_index, index_flatten, [t]].clone().detach()
-                m_list_re[:, :, t] = m_trans.view(batch, -1)
-                s_trans = s_list[batch_index, index_flatten, [t]].clone().detach()
-                s_list_re[:, :, t] = s_trans.view(batch, -1)
+                m_trans = m_list[batch_index, index_flatten, :t+1].clone().detach()
+                m_list_re[:, :, :t+1] = m_trans.view(len(re_index), N_p, -1)
+                s_trans = s_list[batch_index, index_flatten, :t+1].clone().detach()
+                s_list_re[:, :, :t+1] = s_trans.view(len(re_index), N_p, -1)
 
         return m_list, s_list, w_list
 
@@ -119,7 +119,7 @@ class RSPF:
 
 
 class RSDPF(nn.Module, RSPF): 
-    def __init__(self, rs=True, nf=False, mu_u=torch.tensor(0.), sigma_u=torch.Tensor(1).uniform_(0.1, 0.5), mu_v=torch.tensor(0.), sigma_v=torch.Tensor(1).uniform_(0.1, 0.5), tran_matrix=False, beta=False, learning_rate=1e-3): 
+    def __init__(self, rs=True, nf=False, mu_u=torch.tensor(0.), sigma_u=torch.Tensor(1).uniform_(0.1, 0.5), mu_v=torch.tensor(0.), sigma_v=torch.Tensor(1).uniform_(0.1, 0.5), tran_matrix=False, beta=False, learning_rate=1e-4): 
         super().__init__()
         self.mat_P = nn.Parameter(tran_matrix)
         self.beta = nn.Parameter(beta)
@@ -139,12 +139,12 @@ class RSDPF(nn.Module, RSPF):
         self.sigma_v = nn.Parameter(sigma_v)
         if nf: 
             self.proposal = Cond_PlanarFlows(dim=1, N_m=8, layer=2)
-            self.measure = Cond_PlanarFlows(dim=1, N_m=8, layer=2)
+            # self.measure = Cond_PlanarFlows(dim=1, N_m=8, layer=2)
         self.rs = rs
         self.nf = nf
         self.loss = nn.MSELoss()
         self.optim = torch.optim.SGD([self.co_A, self.co_B, self.co_C, self.co_D], lr = learning_rate, momentum=0.9)
-        self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[40], gamma=0.5)
+        self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[10, 20, 30], gamma=0.8)
 
     def state(self, m_t, s_p): 
         s_t = self.co_A[m_t] * s_p + self.co_B[m_t] + torch.randn(s_p.shape, device=device) * self.sigma_u + self.mu_u
@@ -165,7 +165,7 @@ class RSDPF(nn.Module, RSPF):
         s_list_re = s_list.clone().detach()
         if self.nf: 
             s_list_prop = s_list.clone().detach()
-            z_list = s_list.clone().detach()
+            # z_list = s_list.clone().detach()
         w_list[:, :, 0] = 1/N_p
         w_list_re = w_list.clone().detach()
         for t in range(1, T): 
@@ -185,13 +185,13 @@ class RSDPF(nn.Module, RSPF):
             
             if self.nf: 
                 s_list_prop[:, :, [t]], logdetJ_prop = self.proposal(m=m_list[:, :, [t]], s=s_list[:, :, [t]], o=o[:, :, [t]])
-                z_list[:, :, [t]], logdetJ_obs = self.measure(m=m_list[:, :, [t]], s=o[:, :, [t]], o=s_list_prop[:, :, [t]])
+                # z_list[:, :, [t]], logdetJ_obs = self.measure(m=m_list[:, :, [t]], s=o[:, :, [t]], o=s_list_prop[:, :, [t]])
                 logden_dyn = dyn_density(self, m_list[:, :, [t]], s_list[:, :, [t]], s_list_re[:, :, [t-1]])
                 logden_prop = dyn_density(self, m_list[:, :, [t]], s_list_prop[:, :, [t]], s_list_re[:, :, [t-1]], logdetJ_prop)
-                logden_obs = obs_density(z_list[:, :, [t]], logdetJ_obs)
+                # logden_obs = obs_density(z_list[:, :, [t]], logdetJ_obs)
 
                 if prop=="Boot": 
-                    w_list[:, :, [t]] = weights_CNFs(w_list_re[:, :, [t-1]], logden_dyn, logden_prop, logden_obs)
+                    w_list[:, :, [t]] = weights_CNFs(w_list_re[:, :, [t-1]], logden_dyn, logden_prop, m_list[:, :, [t]], s_list_prop[:, :, [t]], o[:, :, [t]], self)
             else: 
                 if prop=="Boot": 
                     w_list[:, :, [t]] = weights_bootstrap(self, w_list_re[:, :, [t-1]], m_list[:, :, [t]], s_list[:, :, [t]], o[:, :, [t]])
@@ -215,10 +215,10 @@ class RSDPF(nn.Module, RSPF):
                 batch_index = torch.arange(batch, dtype=torch.long).tile(N_p, 1).T.reshape(-1)
                 index_flatten = index.view(-1)
                 if len(self.co_A) > 1: 
-                    m_trans = m_list[batch_index, index_flatten, [t]].clone().detach()
-                    m_list_re[:, :, t] = m_trans.view(batch, -1)
-                s_trans = s_list[batch_index, index_flatten, [t]].clone().detach()
-                s_list_re[:, :, t] = s_trans.view(batch, -1)
+                    m_trans = m_list[batch_index, index_flatten, :t+1].clone().detach()
+                    m_list_re[:, :, :t+1] = m_trans.view(len(re_index), N_p, -1)
+                s_trans = s_list[batch_index, index_flatten, :t+1].clone().detach()
+                s_list_re[:, :, :t+1] = s_trans.view(len(re_index), N_p, -1)
 
         return m_list, s_list, w_list
 
@@ -234,7 +234,8 @@ class RSDPF(nn.Module, RSPF):
             for i, (m_train, s_train, o_train) in enumerate(train_data): 
                 s_est = self(m_train[:, :, [0]], s_train[:, :, [0]], o_train, N_p, dyn, prop, re)
                 # loss_sample = ((s_est - s_data)**2).mean(dim=2, keepdim=True)
-                loss = self.loss(s_est, s_train)
+                nll = - torch.distributions.Normal(loc=s_train, scale=self.sigma_u).log_prob(s_est)
+                loss = nll.mean()
                 # loss_sample.mean(dim=0, keepdim=True)
                 loss.backward()
 
@@ -314,9 +315,9 @@ class MMPF(RSPF):
                 batch_index = torch.arange(batch, dtype=torch.long).tile(N_p, 1).T.reshape(-1)
                 m_index = torch.arange(N_m, dtype=torch.long).tile(N_pm, 1).T.reshape(-1).tile(batch)
                 index_flatten = index.view(-1)
-                s_trans = s_list[batch_index, m_index, index_flatten, [t]].clone().detach()
+                s_trans = s_list[batch_index, m_index, index_flatten, :t+1].clone().detach()
                 
-                s_list_re[:, :, :, [t]] = s_trans.view(batch, N_m, N_pm, 1)
+                s_list_re[:, :, :, :t+1] = s_trans.view(batch, N_m, N_pm, -1)
 
         return pi_list, s_list, w_list
 

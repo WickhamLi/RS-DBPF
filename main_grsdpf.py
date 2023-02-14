@@ -14,7 +14,7 @@ device = torch.device('cpu')
 T = 50
 N_p_train = 200
 N_p_test = 2000
-# dyn_list = ["Mark", "Poly"]
+dyn_list = ["Mark", "Poly"]
 # prop_list = ["Boot", "Uni", "Deter"]
 # re = "mul"
 # gamma_list = [0.0, 0.5, 1.0]
@@ -25,15 +25,16 @@ P, A, B, C, D, beta = create_parameters(N_m=8)
 
 # dataload_time = datetime.datetime.now()
 
-trainingset = LoadTrainSet(dir="Poly_0.5")
-train_data = DataLoader(dataset=trainingset, batch_size=100, shuffle=True)
-validationset = LoadValSet(dir="Poly_0.5")
-val_data = DataLoader(dataset=validationset, batch_size=500, shuffle=True)
-rsdpf = RSDPF(rs=True, nf=True, tran_matrix=P, beta=beta).to(device)
-rsdpf.train(train_data, val_data, N_iter=40, N_p=N_p_train, dyn="Poly", prop="Boot", re="mul")  
-testset = LoadTestSet(dir="Poly_0.5")
-test_data = DataLoader(dataset=testset, batch_size=500)
-rsdpf.test(test_data, N_p=N_p_test, dyn="Poly", prop="Boot", re="mul")
+for dyn in dyn_list: 
+    trainingset = LoadTrainSet(dir=f"{dyn}_0.1")
+    train_data = DataLoader(dataset=trainingset, batch_size=100, shuffle=True)
+    validationset = LoadValSet(dir=f"{dyn}_0.1")
+    val_data = DataLoader(dataset=validationset, batch_size=500, shuffle=True)
+    rsdpf = RSDPF(rs=True, nf=True, tran_matrix=P, beta=beta).to(device)
+    rsdpf.train(train_data, val_data, N_iter=40, N_p=N_p_train, dyn=dyn, prop="Boot", re="mul")  
+    testset = LoadTestSet(dir=f"{dyn}_0.1")
+    test_data = DataLoader(dataset=testset, batch_size=500)
+    rsdpf.test(test_data, N_p=N_p_test, dyn=dyn, prop="Boot", re="mul")
 
 # rs_list = [True, False]
 

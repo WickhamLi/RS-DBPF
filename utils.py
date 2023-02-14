@@ -95,7 +95,7 @@ def weights_bootstrap(model, w_list, m_list, s_list, o):
     #     s_list = torch.where(s_list==0., 1e-4, s_list)
     # s_obs = s_list.clone().detach()
     o = o.tile(1, s_list.shape[1], 1) - (model.co_C[m_list] * torch.sqrt(torch.abs(s_list)) + model.co_D[m_list])
-    lw += torch.distributions.normal.Normal(loc=0., scale=model.sigma_v).log_prob(o)
+    lw += torch.distributions.Normal(loc=0., scale=model.sigma_v).log_prob(o)
 #     for i in range(len(s_list)): 
 #         lw[i] += stats.norm(loc=model.co_C[m_list[i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[i]], scale=np.sqrt(0.1)).logpdf(o)
 # #         w += 10**(-300)
@@ -120,7 +120,7 @@ def weights_proposal(model, w_list, m_list, s_list, o, dyn):
         index_flatten = m_list[:, :, [-1]].view(-1)
         lp = torch.log(prob[batch_index, pars_index, index_flatten].view(batch, N_p, 1))
 
-    lw += torch.distributions.normal.Normal(loc=0., scale=0.1**(0.5)).log_prob(o) + lp - torch.log(torch.tensor(1/len(model.co_A)))
+    lw += torch.distributions.Normal(loc=0., scale=0.1**(0.5)).log_prob(o) + lp - torch.log(torch.tensor(1/len(model.co_A)))
     # for i in range(len(s_list)): 
     #     lw[i] += stats.norm(loc=model.co_C[m_list[-1, i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[-1, i]], scale=np.sqrt(0.1)).logpdf(o) + lp[i] - np.log((1/len(model.co_A)))
 #         w += 10**(-300)
@@ -132,7 +132,7 @@ def weights_proposal(model, w_list, m_list, s_list, o, dyn):
 def weights_mmpf(model, w_list, s_list, pi_list, o): 
     lw = torch.log(w_list)
     o = o.tile(1, s_list.shape[1], s_list.shape[2])[:, :, :, None] - (model.co_C * torch.sqrt(torch.abs(s_list)) + model.co_D)
-    lw += torch.distributions.normal.Normal(loc=0., scale=model.sigma_v).log_prob(o)
+    lw += torch.distributions.Normal(loc=0., scale=model.sigma_v).log_prob(o)
     w = torch.exp(lw - lw.max(dim=2, keepdim=True)[0])
     pi_list *= w.sum(dim=2, keepdim=True) 
     return w/w.sum(dim=2, keepdim=True), pi_list/pi_list.sum(dim=1, keepdim=True)
@@ -150,10 +150,10 @@ def obs_density(z, logdetJ):
 
     return log_den
 
-def weights_CNFs(w, logden_dyn, logden_prop, logden_obs): 
+def weights_CNFs(w, logden_dyn, logden_prop, m, s, o, model): 
     lw = torch.log(w)
-    # o = o.tile(1, s.shape[1], 1) - (model.co_C[m] * torch.sqrt(torch.abs(s)) + model.co_D[m])
-    # logden_obs = torch.distributions.normal.Normal(loc=0., scale=model.sigma_v).log_prob(o)
+    o = o.tile(1, s.shape[1], 1) - (model.co_C[m] * torch.sqrt(torch.abs(s)) + model.co_D[m])
+    logden_obs = torch.distributions.Normal(loc=0., scale=model.sigma_v).log_prob(o)
     lw += (logden_dyn + logden_obs - logden_prop)
     w = torch.exp(lw - lw.max(dim=1, keepdim=True)[0])
     return w/w.sum(dim=1, keepdim=True)
