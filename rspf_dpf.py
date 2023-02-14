@@ -107,7 +107,7 @@ class RSPF:
                 s_trans = s_list[batch_index, index_flatten, :t+1].clone().detach()
                 s_list_re[:, :, :t+1] = s_trans.view(len(re_index), N_p, -1)
 
-        return m_list, s_list, w_list
+        return m_list_re, s_list_re, w_list_re
 
     def test(self, test_data, N_p=2000, dyn="Mark", prop="Boot", re="mul"): 
         for m_test, s_test, o_test in test_data: 
@@ -220,11 +220,14 @@ class RSDPF(nn.Module, RSPF):
                 s_trans = s_list[batch_index, index_flatten, :t+1].clone().detach()
                 s_list_re[:, :, :t+1] = s_trans.view(len(re_index), N_p, -1)
 
-        return m_list, s_list, w_list
+        return m_list, s_list, w_list, m_list_re, s_list_re, w_list_re
 
-    def forward(self, m_data, s_data, o_data, N_p, dyn, prop, re):  
-        m_parlist, s_parlist, w_parlist = self.filtering(m_data, s_data, o_data, N_p=N_p, dyn=dyn, prop=prop, re=re)
-        s_est = (w_parlist * s_parlist).sum(dim=1, keepdim=True)
+    def forward(self, m_data, s_data, o_data, N_p, dyn, prop, re, train=True):  
+        m_parlist, s_parlist, w_parlist, m_re, s_re, w_re = self.filtering(m_data, s_data, o_data, N_p=N_p, dyn=dyn, prop=prop, re=re)
+        if train: 
+            s_est = (w_parlist * s_parlist).sum(dim=1, keepdim=True)
+        else: 
+            s_est = (w_re * s_re).sum(dim=1, keepdim=True)
         return s_est
     
     def train(self, train_data, val_data, N_iter=50, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
@@ -234,8 +237,8 @@ class RSDPF(nn.Module, RSPF):
             for i, (m_train, s_train, o_train) in enumerate(train_data): 
                 s_est = self(m_train[:, :, [0]], s_train[:, :, [0]], o_train, N_p, dyn, prop, re)
                 # loss_sample = ((s_est - s_data)**2).mean(dim=2, keepdim=True)
-                nll = - torch.distributions.Normal(loc=s_train, scale=self.sigma_u).log_prob(s_est)
-                loss = nll.mean()
+                nll = - torch.distributions.Normal(loc=s_est, scale=self.sigma_u).log_prob(s_train)
+                loss = self.loss(s_est, s_train) + nll.mean()
                 # loss_sample.mean(dim=0, keepdim=True)
                 loss.backward()
 
@@ -245,7 +248,7 @@ class RSDPF(nn.Module, RSPF):
             self.optim_scheduler.step()
             with torch.no_grad(): 
                 for m_val, s_val, o_val in val_data: 
-                    s_est = self(m_val[:, :, [0]], s_val[:, :, [0]], o_val, N_p, dyn, prop, re)
+                    s_est = self(m_val[:, :, [0]], s_val[:, :, [0]], o_val, N_p, dyn, prop, re, train=False)
                     # loss = ((s_est - s_val)**2).mean()
                     loss = self.loss(s_est, s_val)
                     if loss.item() < l.min(): 
@@ -259,7 +262,7 @@ class RSDPF(nn.Module, RSPF):
         best_val = torch.load(f'./results/rsdpf/bestval_rs{self.rs}_nf{self.nf}_{dyn}_{prop}_{re}')
         with torch.no_grad(): 
             for m_test, s_test, o_test in test_data: 
-                s_est = best_val(m_test[:, :, [0]], s_test[:, :, [0]], o_test, N_p, dyn, prop, re)
+                s_est = best_val(m_test[:, :, [0]], s_test[:, :, [0]], o_test, N_p, dyn, prop, re, train=False)
                 loss = self.loss(s_est, s_test)
                 print(f'DPF test loss = {loss.item():.8f}')
             mse_dpf = ((s_est - s_test)**2).detach().numpy()
@@ -319,7 +322,7 @@ class MMPF(RSPF):
                 
                 s_list_re[:, :, :, :t+1] = s_trans.view(batch, N_m, N_pm, -1)
 
-        return pi_list, s_list, w_list
+        return pi_list, s_list_re, w_list_re
 
     def test(self, test_data, N_p=2000, re="mul", dyn="Mark"): 
         for m_test, s_test, o_test in test_data: 
@@ -381,7 +384,7 @@ class MMPF2(RSPF):
                 s_list_re[:, :, :, t] = s_trans.view(batch, N_m, -1)
                 # s_list_re[:, :, :, t] = s_list_re[:, :, :, t].max(dim=1, keepdim=True)[0]
 
-        return pi_list, s_list, w_list
+        return pi_list, s_list_re, w_list_re
 
     def test(self, test_data, N_p=2000, re="mul"): 
         for m_test, s_test, o_test in test_data: 
