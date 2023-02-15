@@ -15,23 +15,23 @@ T = 50
 N_p_train = 200
 N_p_test = 2000
 dyn_list = ["Mark", "Poly"]
-# prop_list = ["Boot", "Uni", "Deter"]
-# re = "mul"
-# gamma_list = [0.0, 0.5, 1.0]
+prop_list = ["Boot", "Uni", "Deter"]
+re = "mul"
+gamma_list = [0.0, 0.5, 1.0]
 
 P, A, B, C, D, beta = create_parameters(N_m=8)
 
 # paracre_time = datetime.datetime.now()
 
 # dataload_time = datetime.datetime.now()
-
-for dyn in dyn_list: 
+dyn_l = ["Mark", "Poly"]
+for dyn in dyn_l: 
     trainingset = LoadTrainSet(dir=f"{dyn}_0.1")
     train_data = DataLoader(dataset=trainingset, batch_size=100, shuffle=True)
     validationset = LoadValSet(dir=f"{dyn}_0.1")
     val_data = DataLoader(dataset=validationset, batch_size=500, shuffle=True)
-    rsdpf = RSDPF(rs=True, nf=True, tran_matrix=P, beta=beta).to(device)
-    rsdpf.train(train_data, val_data, N_iter=40, N_p=N_p_train, dyn=dyn, prop="Boot", re="mul")  
+    rsdpf = RSDPF(rs=True, nnm=True, nf=False, tran_matrix=P, beta=beta).to(device)
+    rsdpf.train(train_data, val_data, N_iter=60, N_p=N_p_train, dyn=dyn, prop="Boot", re="mul")  
     testset = LoadTestSet(dir=f"{dyn}_0.1")
     test_data = DataLoader(dataset=testset, batch_size=500)
     rsdpf.test(test_data, N_p=N_p_test, dyn=dyn, prop="Boot", re="mul")
@@ -55,7 +55,7 @@ for dyn in dyn_list:
 
 # rspf = RSPF(A, B, C, D, tran_matrix=P, beta=beta)
 # for dyn in dyn_list: 
-#     testset = LoadTestSet(dir=dyn)
+#     testset = LoadTestSet(dir=f"{dyn}_0.1")
 #     test_data = DataLoader(dataset=testset, batch_size=500)
 #     for prop in prop_list: 
 #         rspf.test(test_data, N_p=N_p_test, dyn=dyn, prop=prop, re=re)
@@ -63,7 +63,7 @@ for dyn in dyn_list:
 # for gamma in gamma_list: 
 #     mmpf = MMPF(A, B, C, D, gamma=torch.tensor(gamma))
 #     for dyn in dyn_list: 
-#         testset = LoadTestSet(dir=dyn)
+#         testset = LoadTestSet(dir=f"{dyn}_0.1")
 #         test_data = DataLoader(dataset=testset, batch_size=500)
 #         mmpf.test(test_data, N_p=N_p_test, re=re, dyn=dyn)
 

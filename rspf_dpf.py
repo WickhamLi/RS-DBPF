@@ -23,7 +23,7 @@ class RSPF:
         self.beta = beta
 
     def initial(self, size=(1, 1)): 
-        return torch.multinomial(torch.ones(size[0], len(self.co_A), device=device), replacement=True, num_samples=size[1]), torch.Tensor(size=size).uniform_(-0.5, 0.5).to(device)
+        return torch.multinomial(torch.ones(size[0], len(self.beta), device=device), replacement=True, num_samples=size[1]), torch.Tensor(size=size).uniform_(-0.5, 0.5).to(device)
 
     def Markov_dynamic(self, m_p): 
         batch, N_p = m_p.shape
@@ -48,7 +48,7 @@ class RSPF:
         return m_t.view(batch, N_p)
     
     def propuni_dynamic(self, size=1): 
-        return torch.multinomial(torch.ones(size[0], len(self.co_A), device=device), replacement=True, num_samples=size[1])
+        return torch.multinomial(torch.ones(size[0], len(self.beta), device=device), replacement=True, num_samples=size[1])
         
     def state(self, m_t, s_p): 
         return self.co_A[m_t] * s_p + self.co_B[m_t] + torch.randn(s_p.shape, device=device) * self.sigma_u + self.mu_u
@@ -77,20 +77,20 @@ class RSPF:
             elif prop=="Uni": 
                 m_list[:, :, t] = self.propuni_dynamic(size=(batch, N_p))
             elif prop=='Deter': 
-                m_list[:, :, t] = torch.arange(len(self.co_A)).tile(batch, int(N_p/len(self.co_A)))
+                m_list[:, :, t] = torch.arange(len(self.beta)).tile(batch, int(N_p/len(self.beta)))
             
             m_list_re[:, :, t] = m_list[:, :, t].clone().detach()
             s_list[:, :, [t]] = self.state(m_list[:, :, [t]], s_list_re[:, :, [t-1]])         
             
             if prop=="Boot": 
-                w_list[:, :, [t]] = weights_bootstrap(self, w_list_re[:, :, [t-1]], m_list[:, :, [t]], s_list[:, :, [t]], o[:, :, [t]])
+                w_list[:, :, [t]], _ = weights_bootstrap(self, w_list_re[:, :, [t-1]], m_list[:, :, [t]], s_list[:, :, [t]], o[:, :, [t]])
             else:
                 if dyn=="Mark": 
                     w_list[:, :, [t]] = weights_proposal(self, w_list_re[:, :, [t-1]], m_list_re[:, :, t-1:t+1], s_list[:, :,[t]], o[:, :, [t]], dyn)
                 elif dyn=="Poly": 
                     w_list[:, :, [t]] = weights_proposal(self, w_list_re[:, :, [t-1]], m_list_re[:, :, :t+1], s_list[:, :, [t]], o[:, :, [t]], dyn)
             w_list_re[:, :, t] = w_list[:, :, t].clone().detach()
-            ESS = 1 / (w_list[:, :, t]**2).sum(dim=1) < s_list.shape[1]
+            ESS = 1 / (w_list[:, :, t]**2).sum(dim=1) < (s_list.shape[1] + 1)
             if ESS.sum(): 
                 re_index = torch.where(ESS)[0]
                 index = torch.arange(N_p, dtype=torch.long, device=device).tile(batch, 1)
@@ -107,7 +107,7 @@ class RSPF:
                 s_trans = s_list[batch_index, index_flatten, :t+1].clone().detach()
                 s_list_re[:, :, :t+1] = s_trans.view(len(re_index), N_p, -1)
 
-        return m_list_re, s_list_re, w_list_re
+        return m_list, s_list, w_list
 
     def test(self, test_data, N_p=2000, dyn="Mark", prop="Boot", re="mul"): 
         for m_test, s_test, o_test in test_data: 
@@ -119,11 +119,16 @@ class RSPF:
 
 
 class RSDPF(nn.Module, RSPF): 
-    def __init__(self, rs=True, nf=False, mu_u=torch.tensor(0.), sigma_u=torch.Tensor(1).uniform_(0.1, 0.5), mu_v=torch.tensor(0.), sigma_v=torch.Tensor(1).uniform_(0.1, 0.5), tran_matrix=False, beta=False, learning_rate=1e-4): 
+    def __init__(self, rs=True, nnm=False, nf=False, mu_u=torch.tensor(0.), sigma_u=torch.Tensor(1).uniform_(0.1, 0.5), mu_v=torch.tensor(0.), sigma_v=torch.Tensor(1).uniform_(0.1, 0.5), tran_matrix=False, beta=False, learning_rate=1e-3): 
         super().__init__()
-        self.mat_P = nn.Parameter(tran_matrix)
-        self.beta = nn.Parameter(beta)
-        if rs: 
+        self.mat_P = tran_matrix
+        self.beta = beta
+        self.dim = 1
+        self.N_m = 8
+        if nnm and rs: 
+            self.dynamic = dynamic_NN(self.dim, 4, self.dim)
+            self.measure = dynamic_NN(self.dim, 4, self.dim)
+        elif rs: 
             self.co_A = nn.Parameter(torch.Tensor(self.mat_P.shape[-1]).uniform_(-1, 1))
             self.co_B = nn.Parameter(torch.Tensor(self.mat_P.shape[-1]).uniform_(-4, 4))
             self.co_C = nn.Parameter(self.co_A.data.clone().detach())
@@ -138,38 +143,67 @@ class RSDPF(nn.Module, RSPF):
         self.mu_v = mu_v
         self.sigma_v = nn.Parameter(sigma_v)
         if nf: 
-            self.proposal = Cond_PlanarFlows(dim=1, N_m=8, layer=2)
-            # self.measure = Cond_PlanarFlows(dim=1, N_m=8, layer=2)
+            self.dynamic_nf = PlanarFlows(s_dim=1, N_m=8, layer=2)
+            self.measure_nf = CondPlanarFlows_Measurement(s_dim=1, N_m=8, layer=2)
         self.rs = rs
+        self.nnm = nnm
         self.nf = nf
         self.loss = nn.MSELoss()
-        self.optim = torch.optim.SGD([self.co_A, self.co_B, self.co_C, self.co_D], lr = learning_rate, momentum=0.9)
-        self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[10, 20, 30], gamma=0.8)
+        self.optim = torch.optim.SGD(self.parameters(), lr = learning_rate, momentum=0.9)
+        self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[20, 30, 40, 50], gamma=0.9)
 
     def state(self, m_t, s_p): 
-        s_t = self.co_A[m_t] * s_p + self.co_B[m_t] + torch.randn(s_p.shape, device=device) * self.sigma_u + self.mu_u
+        s_t = self.co_A[m_t] * s_p + self.co_B[m_t] + torch.randn(s_p.shape, device=device) * self.sigma_u[0] + self.mu_u
         return torch.where(s_t==0., s_t+1e-4, s_t)
+
+    def state_nn(self, m_t, s_p): 
+        s_t = torch.empty(s_p.shape)
+        s_t[m_t==0] = self.dynamic(s_p[m_t==0], 0)
+        s_t[m_t==1] = self.dynamic(s_p[m_t==1], 1)
+        s_t[m_t==2] = self.dynamic(s_p[m_t==2], 2)
+        s_t[m_t==3] = self.dynamic(s_p[m_t==3], 3)
+        s_t[m_t==4] = self.dynamic(s_p[m_t==4], 4)
+        s_t[m_t==5] = self.dynamic(s_p[m_t==5], 5)
+        s_t[m_t==6] = self.dynamic(s_p[m_t==6], 6)
+        s_t[m_t==7] = self.dynamic(s_p[m_t==7], 7)
+        return s_t + torch.randn(s_p.shape, device=device) * self.sigma_u[0] + self.mu_u
+
+    def measure_nn(self, m_t, s_t): 
+        o_t = torch.empty(s_t.shape)
+        o_t[m_t==0] = self.measure(s_t[m_t==0], 0)
+        o_t[m_t==1] = self.measure(s_t[m_t==1], 1)
+        o_t[m_t==2] = self.measure(s_t[m_t==2], 2)
+        o_t[m_t==3] = self.measure(s_t[m_t==3], 3)
+        o_t[m_t==4] = self.measure(s_t[m_t==4], 4)
+        o_t[m_t==5] = self.measure(s_t[m_t==5], 5)
+        o_t[m_t==6] = self.measure(s_t[m_t==6], 6)
+        o_t[m_t==7] = self.measure(s_t[m_t==7], 7)
+        return o_t + torch.randn(s_t.shape, device=device) * self.sigma_v[0] + self.mu_v
 
     def filtering(self, m, s, o, N_p, dyn, prop, re): 
         batch, _, T = o.shape
         m_list = torch.zeros(batch, N_p, T, dtype=torch.long)
         s_list = torch.zeros(batch, N_p, T)
         w_list = torch.zeros(batch, N_p, T)
-        if len(self.co_A) == 1: 
-            _, s_list[:, :, 0] = self.initial(size=(batch, N_p))
-        else: 
+        if self.rs: 
             m_list[:, :, 0], s_list[:, :, 0] = self.initial(size=(batch, N_p))
+        else: 
+            _, s_list[:, :, 0] = self.initial(size=(batch, N_p))
         # m_list[:, :, [0]] = m
         # s_list[:, :, [0]] = s
         m_list_re = m_list.clone().detach()
         s_list_re = s_list.clone().detach()
+        if self.nnm: 
+            o_list = s_list.clone().detach()
         if self.nf: 
-            s_list_prop = s_list.clone().detach()
-            # z_list = s_list.clone().detach()
+            s_list_dyn = s_list.clone().detach()
+            z_list = s_list.clone().detach()
         w_list[:, :, 0] = 1/N_p
         w_list_re = w_list.clone().detach()
+        w_likelihood = torch.zeros(batch, T)
+        w_likelihood[:, 0] = torch.log(w_list[:, :, 0].mean(dim=1))
         for t in range(1, T): 
-            if len(self.co_A) > 1: 
+            if self.rs: 
                 if prop=="Boot": 
                     if dyn=="Poly": 
                         m_list[:, :, t] = self.Polyaurn_dynamic(m_list_re[:, :, :t])
@@ -178,30 +212,36 @@ class RSDPF(nn.Module, RSPF):
                 elif prop=="Uni": 
                     m_list[:, :, t] = self.propuni_dynamic(size=(batch, N_p))
                 elif prop=='Deter': 
-                    m_list[:, :, t] = torch.arange(len(self.co_A)).tile(batch, int(N_p/len(self.co_A)))
+                    m_list[:, :, t] = torch.arange(len(self.beta)).tile(batch, int(N_p/len(self.beta)))
             
             m_list_re[:, :, t] = m_list[:, :, t].clone().detach()
-            s_list[:, :, [t]] = self.state(m_list[:, :, [t]], s_list_re[:, :, [t-1]])         
-            
+
             if self.nf: 
-                s_list_prop[:, :, [t]], logdetJ_prop = self.proposal(m=m_list[:, :, [t]], s=s_list[:, :, [t]], o=o[:, :, [t]])
-                # z_list[:, :, [t]], logdetJ_obs = self.measure(m=m_list[:, :, [t]], s=o[:, :, [t]], o=s_list_prop[:, :, [t]])
+                s_list_dyn[:, :, [t]] = s_list_re[:, :, [t-1]] + torch.randn(s_list_re[:, :, [t-1]].shape, device=device)
+                s_list[:, :, [t]], logdetJ_prop = self.dynamic_nf(m=m_list[:, :, [t]], s=s_list[:, :, [t]])
+                z_list[:, :, [t]], logdetJ_obs = self.measure_nf(m=m_list[:, :, [t]], s=o[:, :, [t]], o=s_list[:, :, [t]])
                 logden_dyn = dyn_density(self, m_list[:, :, [t]], s_list[:, :, [t]], s_list_re[:, :, [t-1]])
                 logden_prop = dyn_density(self, m_list[:, :, [t]], s_list_prop[:, :, [t]], s_list_re[:, :, [t-1]], logdetJ_prop)
-                # logden_obs = obs_density(z_list[:, :, [t]], logdetJ_obs)
-
+                logden_obs = obs_density(z_list[:, :, [t]], logdetJ_obs)
                 if prop=="Boot": 
-                    w_list[:, :, [t]] = weights_CNFs(w_list_re[:, :, [t-1]], logden_dyn, logden_prop, m_list[:, :, [t]], s_list_prop[:, :, [t]], o[:, :, [t]], self)
+                    w_list[:, :, [t]] = weights_CNFs(w_list_re[:, :, [t-1]], logden_dyn, logden_prop, logden_obs)
+            elif self.nnm: 
+                s_list[:, :, [t]] = self.state_nn(m_list[:, :, [t]], s_list_re[:, :, [t-1]])          
+                if prop=="Boot": 
+                    o_list[:, :, [t]] = self.measure_nn(m_list[:, :, [t]], s_list[:, :, [t]])
+                    w_list[:, :, [t]] = weights_bootstrap_nn(self, w_list_re[:, :, [t-1]], o_list[:, :, [t]], o[:, :, [t]])
             else: 
+                s_list[:, :, [t]] = self.state(m_list[:, :, [t]], s_list_re[:, :, [t-1]])  
                 if prop=="Boot": 
-                    w_list[:, :, [t]] = weights_bootstrap(self, w_list_re[:, :, [t-1]], m_list[:, :, [t]], s_list[:, :, [t]], o[:, :, [t]])
+                    w_list[:, :, [t]], w_likelihood[:, [t]] = weights_bootstrap(self, w_list_re[:, :, [t-1]], m_list[:, :, [t]], s_list[:, :, [t]], o[:, :, [t]])
                 else:
                     if dyn=="Mark": 
                         w_list[:, :, [t]] = weights_proposal(self, w_list_re[:, :, [t-1]], m_list_re[:, :, t-1:t+1], s_list[:, :, [t]], o[:, :, [t]], dyn)
                     else: 
                         w_list[:, :, [t]] = weights_proposal(self, w_list_re[:, :, [t-1]], m_list_re[:, :, :t+1], s_list[:, :, [t]], o[:, :, [t]], dyn)
+
             w_list_re[:, :, t] = w_list[:, :, t].clone().detach()
-            ESS = 1 / (w_list[:, :, t]**2).sum(dim=1) < s_list.shape[1]
+            ESS = 1 / (w_list[:, :, t]**2).sum(dim=1) < (s_list.shape[1] + 1)
     #         print(ESS)
             if ESS.sum(): 
                 re_index = torch.where(ESS)[0]
@@ -214,31 +254,29 @@ class RSDPF(nn.Module, RSPF):
                 
                 batch_index = torch.arange(batch, dtype=torch.long).tile(N_p, 1).T.reshape(-1)
                 index_flatten = index.view(-1)
-                if len(self.co_A) > 1: 
+                if self.rs: 
                     m_trans = m_list[batch_index, index_flatten, :t+1].clone().detach()
                     m_list_re[:, :, :t+1] = m_trans.view(len(re_index), N_p, -1)
                 s_trans = s_list[batch_index, index_flatten, :t+1].clone().detach()
                 s_list_re[:, :, :t+1] = s_trans.view(len(re_index), N_p, -1)
 
-        return m_list, s_list, w_list, m_list_re, s_list_re, w_list_re
+        return m_list, s_list, w_list, w_likelihood
 
-    def forward(self, m_data, s_data, o_data, N_p, dyn, prop, re, train=True):  
-        m_parlist, s_parlist, w_parlist, m_re, s_re, w_re = self.filtering(m_data, s_data, o_data, N_p=N_p, dyn=dyn, prop=prop, re=re)
-        if train: 
-            s_est = (w_parlist * s_parlist).sum(dim=1, keepdim=True)
-        else: 
-            s_est = (w_re * s_re).sum(dim=1, keepdim=True)
-        return s_est
+    def forward(self, m_data, s_data, o_data, N_p, dyn, prop, re):  
+        m_parlist, s_parlist, w_parlist, w_likelihood = self.filtering(m_data, s_data, o_data, N_p=N_p, dyn=dyn, prop=prop, re=re)
+        s_est = (w_parlist * s_parlist).sum(dim=1, keepdim=True)
+        return s_est, w_likelihood
     
     def train(self, train_data, val_data, N_iter=50, N_p=200, dyn="Mark", prop="Boot", re="mul"): 
         N_step = len(train_data)
         l = np.ones(N_iter) * 1e2
         for epoch in range(N_iter): 
             for i, (m_train, s_train, o_train) in enumerate(train_data): 
-                s_est = self(m_train[:, :, [0]], s_train[:, :, [0]], o_train, N_p, dyn, prop, re)
+                s_est, w_likelihood = self(m_train[:, :, [0]], s_train[:, :, [0]], o_train, N_p, dyn, prop, re)
                 # loss_sample = ((s_est - s_data)**2).mean(dim=2, keepdim=True)
-                nll = - torch.distributions.Normal(loc=s_est, scale=self.sigma_u).log_prob(s_train)
-                loss = self.loss(s_est, s_train) + nll.mean()
+                # nll = - torch.distributions.Normal(loc=s_est, scale=self.sigma_u).log_prob(s_train)
+                # nll_2 = - w_likelihood.sum(dim=1)
+                loss =self.loss(s_est, s_train)
                 # loss_sample.mean(dim=0, keepdim=True)
                 loss.backward()
 
@@ -248,26 +286,26 @@ class RSDPF(nn.Module, RSPF):
             self.optim_scheduler.step()
             with torch.no_grad(): 
                 for m_val, s_val, o_val in val_data: 
-                    s_est = self(m_val[:, :, [0]], s_val[:, :, [0]], o_val, N_p, dyn, prop, re, train=False)
+                    s_est, _ = self(m_val[:, :, [0]], s_val[:, :, [0]], o_val, N_p, dyn, prop, re)
                     # loss = ((s_est - s_val)**2).mean()
                     loss = self.loss(s_est, s_val)
                     if loss.item() < l.min(): 
-                        torch.save(self, f'./results/rsdpf/bestval_rs{self.rs}_nf{self.nf}_{dyn}_{prop}_{re}')
+                        torch.save(self, f'./results/rsdpf/bestval_rs{self.rs}_nn{self.nnm}_nf{self.nf}_{dyn}_{prop}_{re}')
                     l[epoch] = loss
             print(f'epoch{epoch+1}/{N_iter}: validation loss = {loss:.8f}')
             
         print(l)
 
     def test(self, test_data, N_p=2000, dyn="Mark", prop="Boot", re="mul"): 
-        best_val = torch.load(f'./results/rsdpf/bestval_rs{self.rs}_nf{self.nf}_{dyn}_{prop}_{re}')
+        best_val = torch.load(f'./results/rsdpf/bestval_rs{self.rs}_nn{self.nnm}_nf{self.nf}_{dyn}_{prop}_{re}')
         with torch.no_grad(): 
             for m_test, s_test, o_test in test_data: 
-                s_est = best_val(m_test[:, :, [0]], s_test[:, :, [0]], o_test, N_p, dyn, prop, re, train=False)
+                s_est, _ = best_val(m_test[:, :, [0]], s_test[:, :, [0]], o_test, N_p, dyn, prop, re)
                 loss = self.loss(s_est, s_test)
                 print(f'DPF test loss = {loss.item():.8f}')
             mse_dpf = ((s_est - s_test)**2).detach().numpy()
             mse_dpfdf = pd.DataFrame(np.squeeze(mse_dpf))
-            mse_dpfdf.to_csv(f'./results/rsdpf/mse_rs{self.rs}_nf{self.nf}_{dyn}_{prop}_{re}')
+            mse_dpfdf.to_csv(f'./results/rsdpf/mse_rs{self.rs}_nn{self.nnm}_nf{self.nf}_{dyn}_{prop}_{re}')
 
 
 class MMPF(RSPF): 
@@ -305,7 +343,7 @@ class MMPF(RSPF):
             w_list[:, :, :, [t]], pi_list[:, :, :, [t]] = weights_mmpf(self, w_list_re[:, :, :, [t-1]], s_list[:, :, :, [t]], pi_list[:, :, :, [t]], o[:, :, [t]])
             w_list_re[:, :, :, t] = w_list[:, :, :, t].clone().detach()
            
-            ESS = 1 / (w_list[:, :, :, t]**2).sum(dim=2) < s_list.shape[2]
+            ESS = 1 / (w_list[:, :, :, t]**2).sum(dim=2) < (s_list.shape[2] + 1)
             if ESS.sum(): 
                 re_index1, re_index2 = torch.where(ESS)[0], torch.where(ESS)[1]
                 index = torch.arange(N_pm, dtype=torch.long, device=device).tile(batch, N_m, 1)                
@@ -322,7 +360,7 @@ class MMPF(RSPF):
                 
                 s_list_re[:, :, :, :t+1] = s_trans.view(batch, N_m, N_pm, -1)
 
-        return pi_list, s_list_re, w_list_re
+        return pi_list, s_list, w_list
 
     def test(self, test_data, N_p=2000, re="mul", dyn="Mark"): 
         for m_test, s_test, o_test in test_data: 
@@ -367,7 +405,7 @@ class MMPF2(RSPF):
             w_list[:, :, :, [t]], pi_list[:, :, :, [t]] = weights_mmpf(self, w_list_re[:, :, :, [t-1]], s_list[:, :, :, [t]], pi_list[:, :, :, [t]], o[:, :, [t]])
             w_list_re[:, :, :, t] = w_list[:, :, :, t].clone().detach()
            
-            ESS = 1 / ((w_list[:, :, :, t]**2).sum(dim=2)).sum(dim=1) < (s_list.shape[2] * s_list.shape[1])
+            ESS = 1 / ((w_list[:, :, :, t]**2).sum(dim=2)).sum(dim=1) < ((s_list.shape[2] * s_list.shape[1]) + 1)
             if ESS.sum(): 
                 re_index = torch.where(ESS)[0]
                 index = torch.arange(N_pm, dtype=torch.long, device=device).tile(batch, 1)                
@@ -384,7 +422,7 @@ class MMPF2(RSPF):
                 s_list_re[:, :, :, t] = s_trans.view(batch, N_m, -1)
                 # s_list_re[:, :, :, t] = s_list_re[:, :, :, t].max(dim=1, keepdim=True)[0]
 
-        return pi_list, s_list_re, w_list_re
+        return pi_list, s_list, w_list
 
     def test(self, test_data, N_p=2000, re="mul"): 
         for m_test, s_test, o_test in test_data: 
