@@ -107,8 +107,28 @@ def weights_bootstrap_nn(model, w_list, o_list, o):
     o = o.tile(1, o_list.shape[1], 1) - o_list
     lw += torch.distributions.Normal(loc=0., scale=torch.abs(model.sigma_v[0])).log_prob(o)
     w = torch.exp(lw - lw.max(dim=1, keepdim=True)[0])
-    return w/w.sum(dim=1, keepdim=True)
+    return w/w.sum(dim=1, keepdim=True), torch.log(w.mean(dim=1))
 
+def weights_proposal_nn(model, w_list, m_list, o_list, o, dyn): 
+    lw = torch.log(w_list)
+    o = o.tile(1, o_list.shape[1], 1) - o_list
+    if dyn=="Mark": 
+        lp = torch.log(model.mat_P[m_list[:, :, [-2]], m_list[:, :, [-1]]])
+    else: 
+        batch, N_p = m_list.shape[0], m_list.shape[1]
+        alpha = torch.zeros(batch, N_p, len(model.beta))
+        for m_index in range(len(model.beta)): 
+            alpha[:, :, m_index] = torch.sum(m_list[:, :, :-1] == m_index, dim=2)
+        beta = model.beta[None, None, :]
+        prob = (alpha + beta)/(alpha + beta).sum(dim=2, keepdim=True)
+        batch_index = torch.arange(batch, dtype=torch.long).tile(N_p, 1).T.reshape(-1)
+        pars_index = torch.arange(N_p, dtype=torch.long).tile(batch, 1).reshape(-1)
+        index_flatten = m_list[:, :, [-1]].view(-1)
+        lp = torch.log(prob[batch_index, pars_index, index_flatten].view(batch, N_p, 1))
+    lw += torch.distributions.Normal(loc=0., scale=abs(model.sigma_v[0])).log_prob(o) + lp - torch.log(torch.tensor(1/len(model.beta)))
+
+    w = torch.exp(lw - lw.max(dim=1, keepdim=True)[0])
+    return w/w.sum(dim=1, keepdim=True)
 
 def weights_proposal(model, w_list, m_list, s_list, o, dyn): 
     lw = torch.log(w_list)

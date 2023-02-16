@@ -24,17 +24,17 @@ P, A, B, C, D, beta = create_parameters(N_m=8)
 # paracre_time = datetime.datetime.now()
 
 # dataload_time = datetime.datetime.now()
-dyn_l = ["Mark", "Poly"]
+dyn_l = ["Mark"]
 for dyn in dyn_l: 
     trainingset = LoadTrainSet(dir=f"{dyn}_0.1")
     train_data = DataLoader(dataset=trainingset, batch_size=100, shuffle=True)
     validationset = LoadValSet(dir=f"{dyn}_0.1")
     val_data = DataLoader(dataset=validationset, batch_size=500, shuffle=True)
     rsdpf = RSDPF(rs=True, nnm=True, nf=False, tran_matrix=P, beta=beta).to(device)
-    rsdpf.train(train_data, val_data, N_iter=60, N_p=N_p_train, dyn=dyn, prop="Boot", re="mul")  
+    rsdpf.train(train_data, val_data, N_iter=60, N_p=N_p_train, dyn=dyn, prop="Uni", re="mul")  
     testset = LoadTestSet(dir=f"{dyn}_0.1")
     test_data = DataLoader(dataset=testset, batch_size=500)
-    rsdpf.test(test_data, N_p=N_p_test, dyn=dyn, prop="Boot", re="mul")
+    rsdpf.test(test_data, N_p=N_p_test, dyn=dyn, prop="Uni", re="mul")
 
 # rs_list = [True, False]
 

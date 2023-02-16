@@ -426,14 +426,14 @@ class dynamic_NN(nn.Module):
     def __init__(self, input, hidden, output): 
         super().__init__()
         self.input = input
-        self.fc0 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
-        self.fc1 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
-        self.fc2 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
-        self.fc3 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
-        self.fc4 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
-        self.fc5 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
-        self.fc6 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
-        self.fc7 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
+        self.fc0 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
+        self.fc1 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
+        self.fc2 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
+        self.fc3 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
+        self.fc4 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
+        self.fc5 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
+        self.fc6 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
+        self.fc7 = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
 
     def forward(self, s, m): 
         if m==0: 
