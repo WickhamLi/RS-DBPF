@@ -24,7 +24,7 @@ P, A, B, C, D, beta = create_parameters(N_m=8)
 # paracre_time = datetime.datetime.now()
 
 # dataload_time = datetime.datetime.now()
-dyn_l = ["Mark"]
+dyn_l = ["Mark", "Poly"]
 for dyn in dyn_l: 
     trainingset = LoadTrainSet(dir=f"{dyn}_0.1")
     train_data = DataLoader(dataset=trainingset, batch_size=100, shuffle=True)

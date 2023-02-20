@@ -119,15 +119,15 @@ class RSPF:
 
 
 class RSDPF(nn.Module, RSPF): 
-    def __init__(self, rs=True, nnm=False, nf=False, mu_u=torch.tensor(0.), sigma_u=torch.Tensor(1).uniform_(0.1, 0.5), mu_v=torch.tensor(0.), sigma_v=torch.Tensor(1).uniform_(0.1, 0.5), tran_matrix=False, beta=False, learning_rate=1e-3): 
+    def __init__(self, rs=True, nnm=False, nf=False, mu_u=torch.tensor(0.), sigma_u=torch.Tensor(1).uniform_(0.1, 0.5), mu_v=torch.tensor(0.), sigma_v=torch.Tensor(1).uniform_(0.1, 0.5), tran_matrix=False, beta=False, learning_rate=2e-2): 
         super().__init__()
         self.mat_P = tran_matrix
         self.beta = beta
         self.dim = 1
-        self.N_m = 8
+        self.hidden = 4
         if nnm and rs: 
-            self.dynamic = dynamic_NN(self.dim, 6, self.dim)
-            self.measure = dynamic_NN(self.dim, 6, self.dim)
+            self.dynamic = dynamic_NN(self.dim, self.hidden, self.dim)
+            self.measure = dynamic_NN(self.dim, self.hidden, self.dim)
         elif rs: 
             self.co_A = nn.Parameter(torch.Tensor(self.mat_P.shape[-1]).uniform_(-1, 1))
             self.co_B = nn.Parameter(torch.Tensor(self.mat_P.shape[-1]).uniform_(-4, 4))
@@ -148,9 +148,10 @@ class RSDPF(nn.Module, RSPF):
         self.rs = rs
         self.nnm = nnm
         self.nf = nf
+        self.lr = learning_rate
         self.loss = nn.MSELoss()
         self.optim = torch.optim.SGD(self.parameters(), lr = learning_rate, momentum=0.9)
-        self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[40, 50], gamma=0.9)
+        self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[10, 20, 30, 40, 50], gamma=0.5)
 
     def state(self, m_t, s_p): 
         s_t = self.co_A[m_t] * s_p + self.co_B[m_t] + torch.randn(s_p.shape, device=device) * self.sigma_u[0] + self.mu_u
@@ -295,14 +296,14 @@ class RSDPF(nn.Module, RSPF):
                     # loss = ((s_est - s_val)**2).mean()
                     loss = self.loss(s_est, s_val.to(device))
                     if loss.item() < l.min(): 
-                        torch.save(self, f'./results/rsdpf/bestval_rs{self.rs}_nn{self.nnm}_nf{self.nf}_{dyn}_{prop}_{re}')
+                        torch.save(self, f'./results/rsdpf/bestval_rs{self.rs}_nn{self.nnm}_nf{self.nf}_{dyn}_{prop}_{re}_{self.lr}_{self.hidden}')
                     l[epoch] = loss
             print(f'epoch{epoch+1}/{N_iter}: validation loss = {loss:.8f}')
             
         print(l)
 
     def test(self, test_data, N_p=2000, dyn="Mark", prop="Boot", re="mul"): 
-        best_val = torch.load(f'./results/rsdpf/bestval_rs{self.rs}_nn{self.nnm}_nf{self.nf}_{dyn}_{prop}_{re}')
+        best_val = torch.load(f'./results/rsdpf/bestval_rs{self.rs}_nn{self.nnm}_nf{self.nf}_{dyn}_{prop}_{re}_{self.lr}_{self.hidden}')
         with torch.no_grad(): 
             for m_test, s_test, o_test in test_data: 
                 s_est, _ = best_val(m_test[:, :, [0]], s_test[:, :, [0]], o_test.to(device), N_p, dyn, prop, re)
@@ -310,7 +311,7 @@ class RSDPF(nn.Module, RSPF):
                 print(f'DPF test loss = {loss.item():.8f}')
             mse_dpf = ((s_est - s_test.to(device))**2).detach().numpy()
             mse_dpfdf = pd.DataFrame(np.squeeze(mse_dpf))
-            mse_dpfdf.to_csv(f'./results/rsdpf/mse_rs{self.rs}_nn{self.nnm}_nf{self.nf}_{dyn}_{prop}_{re}')
+            mse_dpfdf.to_csv(f'./results/rsdpf/mse_rs{self.rs}_nn{self.nnm}_nf{self.nf}_{dyn}_{prop}_{re}_lr{self.lr}_hidden{self.hidden}')
 
 
 class MMPF(RSPF): 
