@@ -421,8 +421,16 @@ class CondPlanarFlows_Measurement(nn.Module):
         
         return s, log_detJ
 
-
 class dynamic_NN(nn.Module): 
+    def __init__(self, input, hidden, output): 
+        super().__init__()
+        self.input = input
+        self.fc = nn.Sequential(nn.Linear((input), (hidden), dtype=torch.float32), nn.Tanh(), nn.Linear((hidden), (output), dtype=torch.float32))
+
+    def forward(self, s): 
+        return torch.squeeze(self.fc(s.view(-1, self.input)))
+
+class dynamic_RSNN(nn.Module): 
     def __init__(self, input, hidden, output): 
         super().__init__()
         self.input = input
