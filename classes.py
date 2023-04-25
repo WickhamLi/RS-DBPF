@@ -3,9 +3,6 @@ from utils import *
 from NNs import *
 import os
 
-# device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')  
-# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
-# device = torch.device('cpu')
 
 class RSPF: 
     def __init__(self, N_m, mu_u, sigma_u, mu_v, sigma_v, args, device): 
@@ -128,16 +125,13 @@ class RSPF:
  
 
 class DPF(nn.Module): 
-    def __init__(self, nnm, nf, mu_u, mu_v, args, learning_rate, device):
+    def __init__(self, nnm, mu_u, mu_v, args, learning_rate, device):
         super().__init__()
         self.mat_P, _, _, _, _, self.beta = args
         self.hidden = 8
         if nnm: 
             self.dynamic = dynamic_NN(1, self.hidden, 1)
             self.measure = dynamic_NN(1, self.hidden, 1)
-        # elif nf: 
-        #     self.dynamic_nf = PlanarFlows(s_dim=1, N_m=8, layer=2)
-        #     self.measure_nf = CondPlanarFlows_Measurement(s_dim=1, N_m=8, layer=2)
         else: 
             self.co_A = nn.Parameter(torch.Tensor(1).uniform_(-1, 1))
             self.co_B = nn.Parameter(torch.Tensor(1).uniform_(-4, 4))
@@ -150,7 +144,6 @@ class DPF(nn.Module):
         self.sigma_v = nn.Parameter(torch.Tensor(1).uniform_(0.1, 0.5))
 
         self.nnm = nnm
-        self.nf = nf
         self.lr = learning_rate
         self.device = device
         self.loss = nn.MSELoss()
@@ -178,9 +171,6 @@ class DPF(nn.Module):
         s_list_re = s_list.clone().detach()
         if self.nnm: 
             o_list = s_list.clone().detach()
-        # elif self.nf: 
-        #     s_list_dyn = s_list.clone().detach()
-        #     z_list = s_list.clone().detach()
         w_list[:, :, 0] = 1/N_p
         w_list_re = w_list.clone().detach()
         w_likelihood = torch.zeros(batch, T, device=self.device)
@@ -190,14 +180,6 @@ class DPF(nn.Module):
                 s_list[:, :, [t]] = self.state_nn(s_list_re[:, :, [t-1]])
                 o_list[:, :, [t]] = self.measure_nn(s_list[:, :, [t]])          
                 w_list[:, :, [t]], w_likelihood[:, [t]] = weights_bootstrap_nn(self, w_list_re[:, :, [t-1]], o_list[:, :, [t]], o[:, :, [t]])
-            # elif self.nf: 
-            #     s_list_dyn[:, :, [t]] = s_list_re[:, :, [t-1]] + torch.randn(s_list_re[:, :, [t-1]].shape, device=self.device)
-            #     s_list[:, :, [t]], logdetJ_prop = self.dynamic_nf(m=m_list[:, :, [t]], s=s_list[:, :, [t]])
-            #     z_list[:, :, [t]], logdetJ_obs = self.measure_nf(m=m_list[:, :, [t]], s=o[:, :, [t]], o=s_list[:, :, [t]])
-            #     logden_dyn = dyn_density(self, m_list[:, :, [t]], s_list[:, :, [t]], s_list_re[:, :, [t-1]])
-            #     logden_prop = dyn_density(self, m_list[:, :, [t]], s_list_prop[:, :, [t]], s_list_re[:, :, [t-1]], logdetJ_prop)
-            #     logden_obs = obs_density(z_list[:, :, [t]], logdetJ_obs)
-            #     w_list[:, :, [t]] = weights_CNFs(w_list_re[:, :, [t-1]], logden_dyn, logden_prop, logden_obs)
             else: 
                 s_list[:, :, [t]] = self.state(s_list_re[:, :, [t-1]])  
                 w_list[:, :, [t]], w_likelihood[:, [t]] = weights_bootstrap_sin(self, w_list_re[:, :, [t-1]], s_list[:, :, [t]], o[:, :, [t]])
@@ -254,14 +236,14 @@ class DPF(nn.Module):
                     # loss = ((s_est - s_val)**2).mean()
                     loss = self.loss(s_est, s_val.to(self.device))
                     if loss.item() < l.min(): 
-                        torch.save(self, f'./{dir}/dpf_nn{self.nnm}_nf{self.nf}_{dyn}_{re}_lr{self.lr}_hidden{self.hidden}')
+                        torch.save(self, f'./{dir}/dpf_nn{self.nnm}_{dyn}_{re}_lr{self.lr}_hidden{self.hidden}')
                     l[epoch] = loss
             print(f'epoch{epoch+1}/{N_iter}: validation loss = {loss:.8f}')
             
         print(l)
 
     def test(self, test_data, N_p, dyn, re): 
-        best_val = torch.load(f'./results/bestval/dpf_nn{self.nnm}_nf{self.nf}_{dyn}_{re}_lr{self.lr}_hidden{self.hidden}')
+        best_val = torch.load(f'./results/bestval/dpf_nn{self.nnm}_{dyn}_{re}_lr{self.lr}_hidden{self.hidden}')
         best_val.device = self.device
         with torch.no_grad(): 
             for _, s_test, o_test in test_data: 
@@ -275,11 +257,11 @@ class DPF(nn.Module):
             dir = os.path.join('results', 'mse')
             if not os.path.isdir(dir): 
                 os.mkdir(dir)
-            mse_dpfdf.to_csv(f'./{dir}/dpf_nn{self.nnm}_nf{self.nf}_{dyn}_{re}_lr{self.lr}_hidden{self.hidden}')
+            mse_dpfdf.to_csv(f'./{dir}/dpf_nn{self.nnm}_{dyn}_{re}_lr{self.lr}_hidden{self.hidden}')
         
 
 class RSDPF(nn.Module, RSPF): 
-    def __init__(self, N_m, nnm, nf, mu_u, mu_v, args, learning_rate, device): 
+    def __init__(self, N_m, nnm, mu_u, mu_v, args, learning_rate, device): 
         super().__init__()
         self.mat_P, _, _, _, _, self.beta = args
         self.N_m = N_m
@@ -287,9 +269,6 @@ class RSDPF(nn.Module, RSPF):
         if nnm: 
             self.dynamic = dynamic_RSNN(1, self.hidden, 1)
             self.measure = dynamic_RSNN(1, self.hidden, 1)
-        # elif nf: 
-        #     self.dynamic_nf = PlanarFlows(s_dim=1, N_m=8, layer=2)
-        #     self.measure_nf = CondPlanarFlows_Measurement(s_dim=1, N_m=8, layer=2)
         else: 
             self.co_A = nn.Parameter(torch.Tensor(self.N_m).uniform_(-1, 1))
             self.co_B = nn.Parameter(torch.Tensor(self.N_m).uniform_(-4, 4))
@@ -302,7 +281,6 @@ class RSDPF(nn.Module, RSPF):
         self.sigma_v = nn.Parameter(torch.Tensor(1).uniform_(0.1, 0.5))
 
         self.nnm = nnm
-        self.nf = nf
         self.lr = learning_rate
         self.device = device
         self.loss = nn.MSELoss()
@@ -347,9 +325,6 @@ class RSDPF(nn.Module, RSPF):
         s_list_re = s_list.clone().detach()
         if self.nnm: 
             o_list = s_list.clone().detach()
-        # elif self.nf: 
-        #     s_list_dyn = s_list.clone().detach()
-        #     z_list = s_list.clone().detach()
         w_list[:, :, 0] = 1/N_p
         w_list_re = w_list.clone().detach()
         w_likelihood = torch.zeros(batch, T, device=self.device)
@@ -377,15 +352,6 @@ class RSDPF(nn.Module, RSPF):
                         w_list[:, :, [t]] = weights_proposal_nn(self, w_list_re[:, :, [t-1]], m_list_re[:, :, t-1:t+1], o_list[:, :, [t]], o[:, :, [t]], dyn)
                     else: 
                         w_list[:, :, [t]] = weights_proposal_nn(self, w_list_re[:, :, [t-1]],  m_list_re[:, :, :t+1], o_list[:, :, [t]], o[:, :, [t]], dyn)
-            # elif self.nf: 
-            #     s_list_dyn[:, :, [t]] = s_list_re[:, :, [t-1]] + torch.randn(s_list_re[:, :, [t-1]].shape, device=self.device)
-            #     s_list[:, :, [t]], logdetJ_prop = self.dynamic_nf(m=m_list[:, :, [t]], s=s_list[:, :, [t]])
-            #     z_list[:, :, [t]], logdetJ_obs = self.measure_nf(m=m_list[:, :, [t]], s=o[:, :, [t]], o=s_list[:, :, [t]])
-            #     logden_dyn = dyn_density(self, m_list[:, :, [t]], s_list[:, :, [t]], s_list_re[:, :, [t-1]])
-            #     logden_prop = dyn_density(self, m_list[:, :, [t]], s_list_prop[:, :, [t]], s_list_re[:, :, [t-1]], logdetJ_prop)
-            #     logden_obs = obs_density(z_list[:, :, [t]], logdetJ_obs)
-            #     if prop=="Boot": 
-            #         w_list[:, :, [t]] = weights_CNFs(w_list_re[:, :, [t-1]], logden_dyn, logden_prop, logden_obs)
             else: 
                 s_list[:, :, [t]] = self.state(m_list[:, :, [t]], s_list_re[:, :, [t-1]])  
                 if prop=="Boot": 
@@ -398,7 +364,6 @@ class RSDPF(nn.Module, RSPF):
 
             w_list_re[:, :, t] = w_list[:, :, t].clone().detach()
             ESS = 1 / (w_list[:, :, t]**2).sum(dim=1) < (s_list.shape[1] + 1)
-    #         print(ESS)
             if ESS.sum(): 
                 re_index = torch.where(ESS)[0]
                 index = torch.arange(N_p, dtype=torch.long, device=self.device).tile(batch, 1)                
@@ -450,14 +415,14 @@ class RSDPF(nn.Module, RSPF):
                     # loss = ((s_est - s_val)**2).mean()
                     loss = self.loss(s_est, s_val.to(self.device))
                     if loss.item() < l.min(): 
-                        torch.save(self, f'./{dir}/rsdpf_nn{self.nnm}_nf{self.nf}_{dyn}_{prop}_{re}_lr{self.lr}_hidden{self.hidden}')
+                        torch.save(self, f'./{dir}/rsdpf_nn{self.nnm}_{dyn}_{prop}_{re}_lr{self.lr}_hidden{self.hidden}')
                     l[epoch] = loss
             print(f'epoch{epoch+1}/{N_iter}: validation loss = {loss:.8f}')
             
         print(l)
 
     def test(self, test_data, N_p=2000, dyn="Mark", prop="Boot", re="mul"): 
-        best_val = torch.load(f'./results/bestval/rsdpf_nn{self.nnm}_nf{self.nf}_{dyn}_{prop}_{re}_lr{self.lr}_hidden{self.hidden}')
+        best_val = torch.load(f'./results/bestval/rsdpf_nn{self.nnm}_{dyn}_{prop}_{re}_lr{self.lr}_hidden{self.hidden}')
         best_val.device = self.device
         with torch.no_grad(): 
             for _, s_test, o_test in test_data: 
@@ -471,7 +436,7 @@ class RSDPF(nn.Module, RSPF):
             dir = os.path.join('results', 'mse')
             if not os.path.isdir(dir): 
                 os.mkdir(dir)
-            mse_dpfdf.to_csv(f'./{dir}/rsdpf_nn{self.nnm}_nf{self.nf}_{dyn}_{prop}_{re}_lr{self.lr}_hidden{self.hidden}')
+            mse_dpfdf.to_csv(f'./{dir}/rsdpf_nn{self.nnm}_{dyn}_{prop}_{re}_lr{self.lr}_hidden{self.hidden}')
 
 
 class MMPF(RSPF): 
@@ -545,66 +510,5 @@ class MMPF(RSPF):
                 os.mkdir(dir)
             mse_mmpfdf.to_csv(f'./{dir}/mmpf_{dyn}_gamma{self.gamma:.1f}_{re}')
 
-
-# class MMPF2(RSPF): 
-#     def __init__(self, A, B, C, D, mu_u=torch.tensor(0.), sigma_u=torch.tensor(0.1**(0.5)), mu_v=torch.tensor(0.), sigma_v=torch.tensor(0.1**(0.5)), gamma=torch.tensor(1.0)): 
-#         self.co_A = A.view(1, -1, 1, 1)
-#         self.co_B = B.view(1, -1, 1, 1)
-#         self.co_C = C.view(1, -1, 1, 1)
-#         self.co_D = D.view(1, -1, 1, 1)
-#         self.mu_u = mu_u
-#         self.sigma_u = sigma_u
-#         self.mu_v = mu_v
-#         self.sigma_v = sigma_v
-#         self.gamma = gamma
-
-#     def state(self, s_p): 
-#         return self.co_A * s_p + self.co_B + torch.randn(s_p.shape, device=device) * self.sigma_u + self.mu_u
-
-#     def filtering(self, s, o, N_p, re): 
-#         batch, _, T = o.shape
-#         N_m = self.co_A.shape[1]
-#         N_pm = int(N_p/N_m)
-#         s_list = torch.zeros(batch, N_m, N_pm, T, device=device)
-#         w_list = torch.zeros(batch, N_m, N_pm, T, device=device)   
-#         pi_list = torch.zeros(batch, N_m, 1, T, device=device)     
-#         # _, s_list[:, :, :, 0] = self.initial(size=(batch, N_m, N_pm))
-#         s_list[:, :, :, 0] = s
-#         s_list_re = s_list.clone().detach()
-#         w_list[:, :, :, 0] = N_m/N_p
-#         w_list_re = w_list.clone().detach()
-#         pi_list[:, :, :, 0] = 1/self.co_A.shape[1]
-#         for t in range(1, T): 
-#             s_list[:, :, :, [t]] = self.state(s_list_re[:, :, :, [t-1]])  
-#             pi_list[:, :, :, [t]] = pi_list[:, :, :, [t-1]]**self.gamma / (pi_list[:, :, :, [t-1]]**self.gamma).sum(dim=1, keepdim=True)
-#             w_list[:, :, :, [t]], pi_list[:, :, :, [t]] = weights_mmpf(self, w_list_re[:, :, :, [t-1]], s_list[:, :, :, [t]], pi_list[:, :, :, [t]], o[:, :, [t]])
-#             w_list_re[:, :, :, t] = w_list[:, :, :, t].clone().detach()
-           
-#             ESS = 1 / ((w_list[:, :, :, t]**2).sum(dim=2)).sum(dim=1) < ((s_list.shape[2] * s_list.shape[1]) + 1)
-#             if ESS.sum(): 
-#                 re_index = torch.where(ESS)[0]
-#                 index = torch.arange(N_pm, dtype=torch.long, device=device).tile(batch, 1)                
-#                 if re=="sys":                    
-#                     index[re_index, :] = resample_systematic((pi_list[re_index, :, :, t] * w_list[re_index, :, :, t]).sum(dim=1))
-#                 else: 
-#                     index[re_index, :] = resample_multinomial((pi_list[re_index, :, :, t] * w_list[re_index, :, :, t]).sum(dim=1))
-#                 w_list_re[re_index, :, :, t] = N_m/N_p
-                
-#                 batch_index = torch.arange(batch, dtype=torch.long).tile(N_p, 1).T.reshape(-1)
-#                 m_index = torch.arange(N_m, dtype=torch.long).tile(N_pm, 1).T.reshape(-1).tile(batch)
-#                 index_flatten = index[:, None, :].tile(1, N_m, 1).view(-1)
-#                 s_trans = s_list[batch_index, m_index, index_flatten, [t]].clone().detach()
-#                 s_list_re[:, :, :, t] = s_trans.view(batch, N_m, -1)
-#                 # s_list_re[:, :, :, t] = s_list_re[:, :, :, t].max(dim=1, keepdim=True)[0]
-
-#         return pi_list, s_list, w_list
-
-#     def test(self, test_data, N_p=2000, re="mul"): 
-#         for m_test, s_test, o_test in test_data: 
-#             pi_list, s_parlist, w_parlist = self.filtering(s_test[:, :, [0]], o_test.to(device), N_p=N_p, re=re)
-#             s_est = (pi_list * (w_parlist * s_parlist).sum(dim=2, keepdim=True)).sum(dim=1)
-#             mse_mmpf = ((s_est - s_test.to(device))**2).detach().numpy()
-#             mse_mmpfdf = pd.DataFrame(np.squeeze(mse_mmpf))
-#             mse_mmpfdf.to_csv(f'./results/mmpf/mse_gamma{self.gamma:.1f}_{re}')
 
 

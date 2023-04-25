@@ -2,9 +2,6 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset
 
-# device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu') 
-# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
-# device = torch.device('cpu')
 
 class LoadTrainSet(Dataset): 
     def __init__(self, dir, train_size): 
@@ -114,10 +111,6 @@ def weights_proposal(model, w_list, m_list, s_list, o, dyn):
         lp = torch.log(prob[batch_index, pars_index, index_flatten].view(batch, N_p, 1))
 
     lw += torch.distributions.Normal(loc=0., scale=model.sigma_v.data).log_prob(o) + lp - torch.log(torch.tensor(1/len(model.co_A)))
-    # for i in range(len(s_list)): 
-    #     lw[i] += stats.norm(loc=model.co_C[m_list[-1, i]] * np.sqrt(np.abs(s_list[i])) + model.co_D[m_list[-1, i]], scale=np.sqrt(0.1)).logpdf(o) + lp[i] - np.log((1/len(model.co_A)))
-#         w += 10**(-300)
-#         print(lw[i])
     w = torch.exp(lw - lw.max(dim=1, keepdim=True)[0])
     return w/w.sum(dim=1, keepdim=True)
 
@@ -130,27 +123,6 @@ def weights_mmpf(model, w_list, s_list, pi_list, o):
     pi_list *= w.sum(dim=2, keepdim=True) 
     return w/w.sum(dim=2, keepdim=True), pi_list/pi_list.sum(dim=1, keepdim=True)
 
-def dyn_density(model, m, s_t, s_p, logdetJ=torch.Tensor([0])): 
-    s_t -= (model.co_A[m] * s_p + model.co_C[m])
-    log_den = torch.distributions.Normal(loc=0., scale=model.sigma_u.data).log_prob(s_t)
-    if logdetJ.sum().item(): 
-        log_den -= logdetJ
-    return log_den
-
-def obs_density(z, logdetJ): 
-    log_z = torch.distributions.Normal(loc=0., scale=1.).log_prob(z)
-    log_den = log_z + logdetJ
-
-    return log_den
-
-def weights_CNFs(w, logden_dyn, logden_prop, m, s, o, model): 
-    lw = torch.log(w)
-    o = o.tile(1, s.shape[1], 1) - (model.co_C[m] * torch.sqrt(torch.abs(s)) + model.co_D[m])
-    logden_obs = torch.distributions.Normal(loc=0., scale=model.sigma_v.data).log_prob(o)
-    lw += (logden_dyn + logden_obs - logden_prop)
-    w = torch.exp(lw - lw.max(dim=1, keepdim=True)[0])
-    return w/w.sum(dim=1, keepdim=True)
-
 def inv_cdf(cum, ws, device): 
     index = torch.ones(ws.shape, dtype=torch.long, device=device) * cum.shape[-1]
     if device == torch.device('mps'): 
@@ -159,10 +131,6 @@ def inv_cdf(cum, ws, device):
         w_cum = ws.cumsum(dim=1).clone().detach()
     for i in range(cum.shape[-1]): 
         index[:, [i]] -= (cum[:, [i]] < w_cum).sum(dim=1, keepdim=True, dtype=torch.long)
-        # while cum[i] > w: 
-        #     k += 1
-        #     w += ws[k]
-        # index[i] = k
     index = torch.where(index < ws.shape[-1], index, ws.shape[-1]-1)
     return index
 

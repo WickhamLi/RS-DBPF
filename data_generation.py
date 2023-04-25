@@ -1,9 +1,8 @@
 import argparse
 import os
 from sklearn.model_selection import train_test_split
-from rspf_dpf import *
+from classes import *
 from utils import *
-import datetime
 
 def create_parameters(N_m, device): 
     P = torch.zeros(N_m, N_m, device=device)
@@ -57,11 +56,8 @@ def main():
 
     args = parser.parse_args()
 
-    # device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')  
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     device = torch.device(args.device)
 
-    a = datetime.datetime.now()
     args_model = create_parameters(args.N_m, device)
     rspf_simu = RSPF(args.N_m, args.mu_u, args.sigma_u, args.mu_v, args.sigma_v, args_model, device)
 
@@ -69,7 +65,7 @@ def main():
         os.mkdir('datasets')
 
     for dyn in args.dyn: 
-        dyn_dir = os.path.join('datasets', f'dyn{dyn}_mu{args.mu_u}_su{args.sigma_u}_mv{args.mu_v}_sv{args.sigma_v}')
+        dyn_dir = os.path.join('datasets', f'{dyn}_mu{args.mu_u}_su{args.sigma_u:.4f}_mv{args.mu_v}_sv{args.sigma_v:.4f}')
         if not os.path.isdir(dyn_dir): 
             os.mkdir(dyn_dir)        
 
@@ -85,15 +81,13 @@ def main():
         o_df = pd.DataFrame(o, dtype=np.float32)
         o_train, o_test = train_test_split(o_df, test_size=args.test_size, shuffle=False)
 
-        m_train.to_csv(f'./datasets/dyn{dyn}_mu{args.mu_u}_su{args.sigma_u}_mv{args.mu_v}_sv{args.sigma_v}/m_train')
-        s_train.to_csv(f'./datasets/dyn{dyn}_mu{args.mu_u}_su{args.sigma_u}_mv{args.mu_v}_sv{args.sigma_v}/s_train')
-        o_train.to_csv(f'./datasets/dyn{dyn}_mu{args.mu_u}_su{args.sigma_u}_mv{args.mu_v}_sv{args.sigma_v}/o_train')
+        m_train.to_csv(f'./datasets/{dyn}_mu{args.mu_u}_su{args.sigma_u:.4f}_mv{args.mu_v}_sv{args.sigma_v:.4f}/m_train')
+        s_train.to_csv(f'./datasets/{dyn}_mu{args.mu_u}_su{args.sigma_u:.4f}_mv{args.mu_v}_sv{args.sigma_v:.4f}/s_train')
+        o_train.to_csv(f'./datasets/{dyn}_mu{args.mu_u}_su{args.sigma_u:.4f}_mv{args.mu_v}_sv{args.sigma_v:.4f}/o_train')
 
-        m_test.to_csv(f'./datasets/dyn{dyn}_mu{args.mu_u}_su{args.sigma_u}_mv{args.mu_v}_sv{args.sigma_v}/m_test')
-        s_test.to_csv(f'./datasets/dyn{dyn}_mu{args.mu_u}_su{args.sigma_u}_mv{args.mu_v}_sv{args.sigma_v}/s_test')
-        o_test.to_csv(f'./datasets/dyn{dyn}_mu{args.mu_u}_su{args.sigma_u}_mv{args.mu_v}_sv{args.sigma_v}/o_test')
-        b = datetime.datetime.now()
-        print((b - a).microseconds)
+        m_test.to_csv(f'./datasets/{dyn}_mu{args.mu_u}_su{args.sigma_u:.4f}_mv{args.mu_v}_sv{args.sigma_v:.4f}/m_test')
+        s_test.to_csv(f'./datasets/{dyn}_mu{args.mu_u}_su{args.sigma_u:.4f}_mv{args.mu_v}_sv{args.sigma_v:.4f}/s_test')
+        o_test.to_csv(f'./datasets/{dyn}_mu{args.mu_u}_su{args.sigma_u:.4f}_mv{args.mu_v}_sv{args.sigma_v:.4f}/o_test')
 
 if __name__ == '__main__': 
     main()
