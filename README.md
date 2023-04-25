@@ -1,4 +1,4 @@
-# RSPF
+# Regime switching differentiable bootstrap particle filter
 
 This repository provides the code to enable reproducibility of the numerical experiments presented in the paper **[Differentiable Bootstrap Particle Filters for Regime-Switching Models](https://arxiv.org/abs/2302.10319)**. 
 
