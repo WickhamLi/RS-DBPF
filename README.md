@@ -10,6 +10,8 @@ This repository provides the code to enable reproducibility of the numerical exp
 - [main_rsdbpf.py](https://github.com/WickhamLi/RS-DBPF/blob/master/main_rsdbpf.py): train, validate, or test the model.
 - [classes.py](https://github.com/WickhamLi/RS-DBPF/blob/master/classes.py): implementation of different particle filtering algorithms evaluated in the paper (MM-PF, DBPF, RS-DBPF, and RS-PF).
 - [utils.py](https://github.com/WickhamLi/RS-DBPF/blob/master/utils.py): useful functions.
+- [Figures.ipynb](https://github.com/WickhamLi/RS-DBPF/blob/master/Figures.ipynb): data analysis. 
+- [requirements.txt](https://github.com/WickhamLi/RS-DBPF/blob/master/requirements.txt): required environment construction. 
 
 
 ## Prerequisites
@@ -33,7 +35,7 @@ python data_generation.py
 to create the synthetic dataset for training, validation and testing sets.
 
 The essential parameter is: 
-- ```-dy/--dynamics``` model switching dynamics, available options: **Mark|Poly**(i.e., Markovian|P${'/o}$lya urn), can be appended for both two.
+- ```-dy/--dynamics``` model switching dynamics, available options: **Mark|Poly**(i.e., Markovian|Polya urn), can be appended for both two.
 
 The generated dataset will be stored in the folder ```./datasets/```.  Some optional parameters are listed as follows:
 
@@ -72,7 +74,7 @@ The generated dataset will be stored in the folder ```./datasets/```.  Some opti
 #### RS-DBPF
 
 - ```-rsdpf/--regimeswitchingdpf``` whether operate regime switching differentiable particle filter, default: **true**.
-- ```-dy/--dynamics``` model switching dynamics, available options: **Mark|Poly**(i.e., Markovian|P${'/o}$lya urn), can be appended for both two.
+- ```-dy/--dynamics``` model switching dynamics, available options: **Mark|Poly**(i.e., Markovian|Polya urn), can be appended for both two.
 - ```-nn/--neuralnetwork``` whether use neural network, default: **true**.
 - ```-pr/--proposal``` proposal type of model index sampling, available options: **Boot|Uni|Deter**(i.e., Bootstrap|Uniform|Deterministic), can be appended for all three.
 
@@ -84,7 +86,7 @@ The generated dataset will be stored in the folder ```./datasets/```.  Some opti
 #### RS-PF
 
 - ```-rspf/--regimeswitchingpf``` whether test regime switching particle filter, default: **true**.
-- ```-dy/--dynamics``` model switching dynamics, available options: **Mark|Poly**(i.e., Markovian|P${'/o}$lya urn), can be appended for both two.
+- ```-dy/--dynamics``` model switching dynamics, available options: **Mark|Poly**(i.e., Markovian|Polya urn), can be appended for both two.
 - ```-pr/--proposal``` proposal type of model index sampling, available options: **Boot|Uni|Deter**(i.e., Bootstrap|Uniform|Deterministic), can be appended for all three.
 
 #### MM-PF
@@ -96,11 +98,11 @@ The generated dataset will be stored in the folder ```./datasets/```.  Some opti
 ## Citation
 
 If you find this code is useful for your research, please cite our paper: 
-'''
-@article{li2023differentiable,
+```
+@article{li2023differentiable, 
   title={Differentiable bootstrap particle filters for regime-switching models},
   author={Li, Wenhan and Chen, Xiongjie and Wang, Wenwu and Elvira, V{\'\i}ctor and Li, Yunpeng},
   journal={arXiv preprint arXiv:2302.10319},
   year={2023}
 }
-'''
+```
