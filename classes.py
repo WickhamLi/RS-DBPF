@@ -284,7 +284,8 @@ class RSDPF(nn.Module, RSPF):
         self.lr = learning_rate
         self.device = device
         self.loss = nn.MSELoss()
-        self.optim = torch.optim.SGD(self.parameters(), lr = learning_rate, momentum=0.9)
+        self.paras = list(para_dyn for i in range(self.N_m) for para_dyn in self.dynamic.fc_list[i].parameters()) + list(para_meas for j in range(self.N_m) for para_meas in self.measure.fc_list[j].parameters())
+        self.optim = torch.optim.SGD(self.paras, lr = learning_rate, momentum=0.9)
         self.optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optim, milestones=[10, 20, 30, 40, 50], gamma=0.5)
 
     def state(self, m_t, s_p): 
